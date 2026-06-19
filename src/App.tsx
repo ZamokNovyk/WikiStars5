@@ -62,6 +62,14 @@ function generateSearchArrays(nombre: string) {
   return { searchTokens, searchKeywords };
 }
 
+function normalizeText(text: string): string {
+  if (!text) return '';
+  return text.toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // remove diacritics
+    .replace(/[^a-z0-9\s]/g, " "); // replace special characters with spaces
+}
+
 export default function App() {
   // Load state from localStorage or use initial values
   const [institutes, setInstitutes] = useState<Institute[]>(INITIAL_INSTITUTES);
@@ -643,23 +651,112 @@ export default function App() {
   // Filters computed
   const filteredInstitutes = useMemo(() => {
     if (!globalSearch.trim()) return institutes;
-    const term = globalSearch.toLowerCase();
-    return institutes.filter(inst => 
-      inst.name.toLowerCase().includes(term) || 
-      inst.shortName.toLowerCase().includes(term) ||
-      inst.description.toLowerCase().includes(term)
-    );
+    
+    const queryNormalized = normalizeText(globalSearch);
+    const queryWords = queryNormalized.split(/\s+/).filter(w => w.length > 0);
+    if (queryWords.length === 0) return institutes;
+
+    const scored = institutes.map(inst => {
+      const nameNorm = normalizeText(inst.name);
+      const shortNameNorm = normalizeText(inst.shortName || '');
+      const descNorm = normalizeText(inst.description || '');
+      const locationNorm = normalizeText(inst.location || '');
+      const combined = `${nameNorm} ${shortNameNorm} ${descNorm} ${locationNorm}`;
+
+      let score = 0;
+      
+      // 1. Exact combined phrase match gets the ultimate boost
+      if (combined.includes(queryNormalized)) {
+        score += 150;
+      }
+      // Exact name match gets another high boost
+      if (nameNorm.includes(queryNormalized)) {
+        score += 80;
+      }
+
+      // 2. Token-by-token matching
+      let matchedWordsCount = 0;
+      queryWords.forEach(word => {
+        if (combined.includes(word)) {
+          matchedWordsCount++;
+          // High weight for word matching name
+          if (nameNorm.includes(word)) {
+            score += 30;
+          }
+          // Weight for shortName
+          if (shortNameNorm.includes(word)) {
+            score += 25;
+          }
+          // Base word weight
+          score += 10;
+        }
+      });
+
+      // Require that at least one of the query terms matches
+      const isMatch = matchedWordsCount > 0;
+      
+      // Bonus if ALL search words are matched
+      if (matchedWordsCount === queryWords.length) {
+        score += 50;
+      }
+
+      return { inst, score, isMatch };
+    });
+
+    return scored
+      .filter(item => item.isMatch && item.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .map(item => item.inst);
   }, [globalSearch, institutes]);
 
   const filteredAlumnosGlobally = useMemo(() => {
     if (!globalSearch.trim()) return [];
-    const term = globalSearch.toLowerCase();
-    return alumnos.filter(al => 
-      al.name.toLowerCase().includes(term) || 
-      (al.nickname && al.nickname.toLowerCase().includes(term)) ||
-      al.bio.toLowerCase().includes(term) ||
-      al.course.toLowerCase().includes(term)
-    );
+    
+    const queryNormalized = normalizeText(globalSearch);
+    const queryWords = queryNormalized.split(/\s+/).filter(w => w.length > 0);
+    if (queryWords.length === 0) return [];
+
+    const scored = alumnos.map(al => {
+      const nameNorm = normalizeText(al.name);
+      const nicknameNorm = normalizeText(al.nickname || '');
+      const bioNorm = normalizeText(al.bio || '');
+      const courseNorm = normalizeText(al.course || '');
+      const combined = `${nameNorm} ${nicknameNorm} ${bioNorm} ${courseNorm}`;
+
+      let score = 0;
+      if (combined.includes(queryNormalized)) {
+        score += 150;
+      }
+      if (nameNorm.includes(queryNormalized)) {
+        score += 80;
+      }
+
+      let matchedWordsCount = 0;
+      queryWords.forEach(word => {
+        if (combined.includes(word)) {
+          matchedWordsCount++;
+          if (nameNorm.includes(word)) {
+            score += 30;
+          }
+          if (nicknameNorm.includes(word)) {
+            score += 25;
+          }
+          score += 10;
+        }
+      });
+
+      const isMatch = matchedWordsCount > 0;
+      if (matchedWordsCount === queryWords.length) {
+        score += 50;
+      }
+
+      return { al, score, isMatch };
+    });
+
+    return scored
+      .filter(item => item.isMatch && item.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .map(item => item.al);
   }, [globalSearch, alumnos]);
 
   const filteredAlumnosInCampus = useMemo(() => {
@@ -675,13 +772,55 @@ export default function App() {
 
     // 3rd: Filter by local sub search bar
     if (studentSearch.trim()) {
-      const term = studentSearch.toLowerCase();
-      pool = pool.filter(al => 
-        al.name.toLowerCase().includes(term) || 
-        (al.nickname && al.nickname.toLowerCase().includes(term)) ||
-        al.bio.toLowerCase().includes(term) ||
-        al.course.toLowerCase().includes(term)
-      );
+      const queryNormalized = normalizeText(studentSearch);
+      const queryWords = queryNormalized.split(/\s+/).filter(w => w.length > 0);
+      
+      if (queryWords.length > 0) {
+        const scoredPool = pool.map(al => {
+          const nameNorm = normalizeText(al.name);
+          const nicknameNorm = normalizeText(al.nickname || '');
+          const bioNorm = normalizeText(al.bio || '');
+          const courseNorm = normalizeText(al.course || '');
+          const combined = `${nameNorm} ${nicknameNorm} ${bioNorm} ${courseNorm}`;
+
+          let score = 0;
+          if (combined.includes(queryNormalized)) {
+            score += 150;
+          }
+          if (nameNorm.includes(queryNormalized)) {
+            score += 80;
+          }
+
+          let matchedWordsCount = 0;
+          queryWords.forEach(word => {
+            if (combined.includes(word)) {
+              matchedWordsCount++;
+              if (nameNorm.includes(word)) {
+                score += 30;
+              }
+              if (nicknameNorm.includes(word)) {
+                score += 25;
+              }
+              score += 10;
+            }
+          });
+
+          // Sort base points are added as tie breaker
+          score += (al.points / 1000);
+
+          const isMatch = matchedWordsCount > 0;
+          if (matchedWordsCount === queryWords.length) {
+            score += 50;
+          }
+
+          return { al, score, isMatch };
+        });
+
+        return scoredPool
+          .filter(item => item.isMatch && item.score > 0)
+          .sort((a, b) => b.score - a.score)
+          .map(item => item.al);
+      }
     }
 
     // Sort by points desc
