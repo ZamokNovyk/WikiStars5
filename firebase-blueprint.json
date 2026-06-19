@@ -54,9 +54,40 @@
         "lastLogin": { "type": "object" }
       },
       "required": ["uid", "displayName", "email", "createdAt", "lastLogin"]
+    },
+    "CentroEducativo": {
+      "title": "CentroEducativo",
+      "description": "Una institución o centro educativo registrado en la plataforma, gestionado por estudiantes.",
+      "type": "object",
+      "properties": {
+        "nombre": { "type": "string" },
+        "tipo": { "type": "string" },
+        "creadoPor": { "type": "string" },
+        "creadoEn": { "type": "object" },
+        "anoDeFundacion": { "type": "null" },
+        "perfilPhotoUrl": { "type": "string" },
+        "portadaPhotoUrl": { "type": "string" },
+        "redesSociales": {
+          "type": "object",
+          "properties": {
+            "facebook": { "type": "string" }
+          }
+        },
+        "searchKeywords": {
+          "type": "array"
+        },
+        "searchTokens": {
+          "type": "array"
+        }
+      },
+      "required": ["nombre", "tipo", "creadoPor", "creadoEn", "perfilPhotoUrl", "portadaPhotoUrl", "searchKeywords", "searchTokens"]
     }
   },
   "firestore": {
+    "/centros.educativos/{centroId}": {
+      "schema": "CentroEducativo",
+      "description": "Colección de todos los centros educativos registrados en la plataforma."
+    },
     "/alumnos/{alumnoId}": {
       "schema": "Alumno",
       "description": "Colección de todos los alumnos registrados en el sistema."

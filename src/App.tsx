@@ -26,18 +26,45 @@ import {
   Brain, 
   Shield, 
   Smartphone,
-  ExternalLink
+  ExternalLink,
+  Plus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Institute, Alumno, AlumnoComment } from './types';
 import { INITIAL_INSTITUTES, INITIAL_ALUMNOS, INITIAL_COMMENTS } from './data';
 import { db, auth, handleFirestoreError, OperationType } from './firebase';
-import { collection, doc, setDoc, getDoc, onSnapshot } from 'firebase/firestore';
+import { collection, doc, setDoc, getDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
 import { GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
+
+function generateDocId(rawName: string) {
+  return rawName.toLowerCase()
+    .replace(/\s+/g, '.')
+    .replace(/[^a-z0-0.]/g, '');
+}
+
+function generateSearchArrays(nombre: string) {
+  const normalized = nombre.toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // remove diacritics
+    .replace(/[^a-z0-9\s]/g, ""); // keep only safe alphanumeric words
+  
+  const tokens = normalized.split(/\s+/).filter(t => t.length > 0);
+  const searchTokens = Array.from(new Set(tokens));
+  
+  const searchKeywordsSet = new Set<string>();
+  for (const token of tokens) {
+    for (let i = 1; i <= token.length; i++) {
+      searchKeywordsSet.add(token.substring(0, i));
+    }
+  }
+  const searchKeywords = Array.from(searchKeywordsSet);
+  
+  return { searchTokens, searchKeywords };
+}
 
 export default function App() {
   // Load state from localStorage or use initial values
-  const [institutes] = useState<Institute[]>(INITIAL_INSTITUTES);
+  const [institutes, setInstitutes] = useState<Institute[]>(INITIAL_INSTITUTES);
   const [alumnos, setAlumnos] = useState<Alumno[]>(INITIAL_ALUMNOS);
   const [comments, setComments] = useState<AlumnoComment[]>(INITIAL_COMMENTS);
   const [currentUser, setCurrentUser] = useState<{
@@ -58,6 +85,13 @@ export default function App() {
   const [selectedAlumnoId, setSelectedAlumnoId] = useState<string | null>(null);
   const [globalSearch, setGlobalSearch] = useState<string>('');
   const [studentSearch, setStudentSearch] = useState<string>('');
+
+  // Create Institute Modal State
+  const [isCreateInstituteModalOpen, setIsCreateInstituteModalOpen] = useState(false);
+  const [newInstituteName, setNewInstituteName] = useState('');
+  const [newInstituteTipo, setNewInstituteTipo] = useState('instituto');
+  const [isSubmittingInstitute, setIsSubmittingInstitute] = useState(false);
+
   const [activeCategoryFilter, setActiveCategoryFilter] = useState<string>('Todos');
 
   // Modals state
@@ -159,9 +193,58 @@ export default function App() {
       console.warn("Could not fetch comments (offline or permissions):", error);
     });
 
+    const unsubscribeInstitutes = onSnapshot(collection(db, 'centros.educativos'), async (snapshot) => {
+      if (snapshot.empty) {
+        // If the database has no institutions yet, seed it with initial values!
+        try {
+          for (const inst of INITIAL_INSTITUTES) {
+            const docId = inst.id; // Map them to their initial ids '1', '2', '3' so existing records link perfectly
+            const { searchTokens, searchKeywords } = generateSearchArrays(inst.name);
+            const newInstDoc = {
+              anoDeFundacion: null,
+              creadoEn: new Date(),
+              creadoPor: 'system',
+              nombre: inst.name,
+              perfilPhotoUrl: inst.image || 'https://images.unsplash.com/photo-1541339907198-e08756dedf3f?auto=format&fit=crop&q=80&w=300',
+              portadaPhotoUrl: inst.image || 'https://images.unsplash.com/photo-1523050854058-8df90110c9f1?auto=format&fit=crop&q=80&w=1200',
+              redesSociales: {
+                facebook: 'https://web.facebook.com/' + inst.name.toLowerCase().replace(/\s+/g, '')
+              },
+              searchKeywords,
+              searchTokens,
+              tipo: inst.id === '3' ? 'instituto' : inst.id === '2' ? 'colegio' : 'instituto'
+            };
+            await setDoc(doc(db, 'centros.educativos', docId), newInstDoc);
+          }
+        } catch (err) {
+          console.error("Failed to seed initial institutions:", err);
+        }
+      } else {
+        const list: Institute[] = [];
+        snapshot.forEach((snapDoc) => {
+          const data = snapDoc.data();
+          list.push({
+            id: snapDoc.id,
+            name: data.nombre || data.name || '',
+            shortName: data.shortName || (data.nombre ? data.nombre.split(' ').map((w: string) => w[0]).join('').toUpperCase().substring(0, 5) : 'INST'),
+            description: data.description || 'Institución educativa registrada.',
+            image: data.perfilPhotoUrl || data.image || 'https://images.unsplash.com/photo-1541339907198-e08756dedf3f?auto=format&fit=crop&q=80&w=300',
+            location: data.location || 'Sede Principal',
+            studentCount: data.studentCount || 0,
+            popularCategory: data.popularCategory || 'General',
+            ratingAverage: data.ratingAverage || 4.5
+          });
+        });
+        setInstitutes(list);
+      }
+    }, (error) => {
+      console.warn("Could not fetch centers (offline or permissions):", error);
+    });
+
     return () => {
       unsubscribeAlumnos();
       unsubscribeComments();
+      unsubscribeInstitutes();
     };
   }, []);
 
@@ -422,6 +505,52 @@ export default function App() {
       setNominateReason('');
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `alumnos/${newId}`);
+    }
+  };
+
+  // Handle Create Institute/School with Firestore saving
+  const handleCreateInstituteSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newInstituteName.trim()) {
+      alert('Por favor, ingresa el nombre de la institución.');
+      return;
+    }
+
+    setIsSubmittingInstitute(true);
+    const docId = generateDocId(newInstituteName);
+    const { searchTokens, searchKeywords } = generateSearchArrays(newInstituteName);
+
+    // Default professional high-quality campus graphics
+    const perfilPhotoUrl = "https://images.unsplash.com/photo-1541339907198-e08756dedf3f?auto=format&fit=crop&q=80&w=300";
+    const portadaPhotoUrl = "https://images.unsplash.com/photo-1523050854058-8df90110c9f1?auto=format&fit=crop&q=80&w=1200";
+
+    const newCentro = {
+      anoDeFundacion: null,
+      creadoEn: serverTimestamp(),
+      creadoPor: auth.currentUser?.uid || "G9m5dcwEdAhc7L3rJeBgpFv4nh73",
+      nombre: newInstituteName.trim(),
+      perfilPhotoUrl,
+      portadaPhotoUrl,
+      redesSociales: {
+        facebook: `https://web.facebook.com/${generateDocId(newInstituteName)}`
+      },
+      searchKeywords,
+      searchTokens,
+      tipo: newInstituteTipo
+    };
+
+    try {
+      await setDoc(doc(db, 'centros.educativos', docId), newCentro);
+      setIsCreateInstituteModalOpen(false);
+      setNewInstituteName('');
+      setNewInstituteTipo('instituto');
+      
+      pushSocialLog(`🏛️ Nuevo centro educativo registrado: ${newCentro.nombre}`);
+      triggerNotice('¡Institución registrada correctamente!');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `centros.educativos/${docId}`);
+    } finally {
+      setIsSubmittingInstitute(false);
     }
   };
 
@@ -734,7 +863,7 @@ export default function App() {
             </h1>
             
             <p className="mt-6 text-zinc-400 max-w-2xl mx-auto text-sm sm:text-base leading-relaxed tracking-wide font-medium">
-              La primera wiki social para calificar, nominar y descubrir a los estudiantes más populares, carismáticos e influyentes de tu centro de estudios. Diseñada con la máxima intensidad en amarillo y negro.
+              La primera wiki social para calificar y descubrir a los estudiantes más populares e influyentes.
             </p>
 
             {/* Search Input matching uploaded mockup */}
@@ -886,8 +1015,10 @@ export default function App() {
                   </p>
                 </div>
                 {!globalSearch && (
-                  <div className="text-zinc-500 text-[10px] uppercase font-mono bg-zinc-950 px-3.5 py-1.8 rounded-xl border border-zinc-900 self-start sm:self-auto text-right font-bold tracking-wider">
-                    CONEXIÓN EN VIVO A: <span className="text-yellow-400">3 SUBCAMPUS</span>
+                  <div className="flex flex-wrap items-center gap-3 self-start sm:self-auto">
+                    <div className="text-zinc-500 text-[10px] uppercase font-mono bg-zinc-950 px-3.5 py-2.5 rounded-full border border-zinc-900 text-right font-bold tracking-wider shrink-0 select-none">
+                      CONEXIÓN EN VIVO A: <span className="text-yellow-400">{institutes.length} CAMPUSE(S)</span>
+                    </div>
                   </div>
                 )}
               </div>
@@ -1989,6 +2120,114 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
+
+      {/* --- MODAL 4: CREAR CENTRO EDUCATIVO --- */}
+      <AnimatePresence>
+        {isCreateInstituteModalOpen && (
+          <div id="create-institute-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            {/* Backdrop */}
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/90 backdrop-blur-sm shadow-2xl"
+              onClick={() => setIsCreateInstituteModalOpen(false)}
+            />
+            {/* Box */}
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-zinc-950 border border-zinc-900 rounded-3xl p-6 sm:p-8 max-w-md w-full relative z-10 space-y-6 shadow-2xl"
+            >
+              <button 
+                onClick={() => setIsCreateInstituteModalOpen(false)}
+                className="absolute top-4 right-4 text-zinc-500 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="text-center">
+                <h3 className="text-xl font-display font-black text-white uppercase tracking-tight">
+                  Crear Nueva Institución
+                </h3>
+                <p className="text-xs text-zinc-400 mt-1 font-sans font-medium">
+                  Añade una nueva institución pública a la plataforma.
+                </p>
+              </div>
+
+              <form onSubmit={handleCreateInstituteSubmit} className="space-y-4 pt-2">
+                {/* School Name */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-black block">Nombre de la Institución *</label>
+                  <input
+                    type="text"
+                    required
+                    value={newInstituteName}
+                    onChange={(e) => setNewInstituteName(e.target.value)}
+                    placeholder="Ej. Instituto de Educación Superior Pedagógico de Uchiza"
+                    className="w-full bg-[#0d0d0d] focus:bg-[#121212] border border-zinc-900 focus:border-yellow-400 text-xs p-3.5 rounded-xl text-zinc-100 outline-none transition-all duration-200 font-sans font-medium placeholder-zinc-700"
+                  />
+                </div>
+
+                {/* Institution Type Select Buttons */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-black block">Tipo de Institución *</label>
+                  <div className="grid grid-cols-3 gap-2 pt-1">
+                    {['instituto', 'universidad', 'colegio'].map(t => {
+                      const isSelected = newInstituteTipo === t;
+                      return (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => setNewInstituteTipo(t)}
+                          className={`py-3 px-2 border rounded-xl font-mono text-[10px] sm:text-xs font-black uppercase transition-all cursor-pointer ${
+                            isSelected 
+                              ? 'bg-yellow-400 text-black border-yellow-400 shadow-[0_4px_12px_rgba(250,204,21,0.15)] scale-[1.02]' 
+                              : 'bg-[#0d0d0d]/80 text-zinc-400 border-zinc-900 hover:border-zinc-800'
+                          }`}
+                        >
+                          {t === 'instituto' ? 'Instituto' : t === 'universidad' ? 'Universidad' : 'Colegio'}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="pt-4">
+                  <button
+                    type="submit"
+                    disabled={isSubmittingInstitute}
+                    className="w-full bg-yellow-400 hover:bg-yellow-350 disabled:bg-zinc-850 disabled:text-zinc-500 text-black font-mono font-black text-xs py-3.5 rounded-xl transition-all duration-300 uppercase tracking-widest cursor-pointer shadow-lg shadow-yellow-400/10 hover:-translate-y-0.5 active:translate-y-0"
+                  >
+                    {isSubmittingInstitute ? 'Creando...' : 'Crear Institución'}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Floating Action Button (FAB) for creating an educational center/school, shown only on Main Screen & only for users registered with Google */}
+      {!selectedInstituteId && !selectedAlumnoId && currentUser && (
+        <motion.button
+          initial={{ scale: 0, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          exit={{ scale: 0, opacity: 0 }}
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={() => {
+            setIsCreateInstituteModalOpen(true);
+            setNewInstituteName('');
+            setNewInstituteTipo('instituto');
+          }}
+          className="fixed bottom-24 right-6 sm:bottom-12 sm:right-12 z-40 bg-yellow-400 hover:bg-yellow-350 text-black p-5 rounded-full shadow-[0_10px_35px_rgba(250,204,21,0.4)] hover:shadow-[0_12px_40px_rgba(250,204,21,0.5)] transition-all duration-200 cursor-pointer border border-yellow-300/40 flex items-center justify-center group"
+          title="Crear Perfil de Centro Educativo"
+        >
+          <Plus className="w-6 h-6 stroke-[3]" />
+        </motion.button>
+      )}
 
     </div>
   );

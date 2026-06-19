@@ -42,6 +42,26 @@ service cloud.firestore {
         && data.likes is int;
     }
 
+    // Helper: Checks if keys are properly constructed for CentroEducativo creation
+    function isValidCentroEducativo(data) {
+      return data.keys().hasAll(['nombre', 'tipo', 'creadoPor', 'creadoEn', 'perfilPhotoUrl', 'portadaPhotoUrl', 'searchKeywords', 'searchTokens'])
+        && data.nombre is string && data.nombre.size() <= 200
+        && data.tipo is string && (data.tipo == 'instituto' || data.tipo == 'universidad' || data.tipo == 'colegio')
+        && data.creadoPor is string
+        && data.perfilPhotoUrl is string
+        && data.portadaPhotoUrl is string
+        && data.searchKeywords is list
+        && data.searchTokens is list;
+    }
+
+    // Centros Educativos collection
+    match /centros.educativos/{centroId} {
+      allow read: if true;
+      allow create: if isValidCentroEducativo(request.resource.data);
+      allow update: if isValidCentroEducativo(request.resource.data);
+      allow delete: if false;
+    }
+
     // Alumnos collection
     match /alumnos/{alumnoId} {
       allow read: if true;
