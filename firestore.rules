@@ -1,0 +1,67 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net (default-deny catch-all)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper: Valid ID Format Check
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-0_\\-]+$');
+    }
+
+    // Helper: Checks if keys are properly constructed for Alumno creation
+    function isValidAlumno(data) {
+      return data.keys().hasAll(['id', 'name', 'instituteId', 'avatar', 'course', 'category', 'bio', 'starsPopularity', 'starsCharisma', 'starsTalent', 'views', 'points'])
+        && data.id is string && data.id.size() <= 128
+        && data.name is string && data.name.size() <= 100
+        && data.instituteId is string && data.instituteId.size() <= 10
+        && data.avatar is string && data.avatar.size() <= 500
+        && data.course is string && data.course.size() <= 150
+        && data.category is string && data.category.size() <= 50
+        && data.bio is string && data.bio.size() <= 500
+        && data.starsPopularity is number && data.starsPopularity >= 0.0 && data.starsPopularity <= 5.0
+        && data.starsCharisma is number && data.starsCharisma >= 0.0 && data.starsCharisma <= 5.0
+        && data.starsTalent is number && data.starsTalent >= 0.0 && data.starsTalent <= 5.0
+        && data.views is int
+        && data.points is int;
+    }
+
+    // Helper: Checks if keys are properly constructed for Comment creation
+    function isValidComment(data) {
+      return data.keys().hasAll(['id', 'alumnoId', 'author', 'avatar', 'text', 'status', 'createdAt', 'likes'])
+        && data.id is string && data.id.size() <= 128
+        && data.alumnoId is string && data.alumnoId.size() <= 128
+        && data.author is string && data.author.size() <= 100
+        && data.avatar is string && data.avatar.size() <= 500
+        && data.text is string && data.text.size() <= 1000
+        && data.status is string && (data.status == 'anonymous' || data.status == 'student' || data.status == 'verified')
+        && data.createdAt is string
+        && data.likes is int;
+    }
+
+    // Alumnos collection
+    match /alumnos/{alumnoId} {
+      allow read: if true;
+      allow create: if isValidAlumno(request.resource.data);
+      allow update: if isValidAlumno(request.resource.data);
+      allow delete: if false; // Deletion is not allowed democratically
+    }
+
+    // Comments collection
+    match /comments/{commentId} {
+      allow read: if true;
+      allow create: if isValidComment(request.resource.data);
+      allow update: if isValidComment(request.resource.data) && request.resource.data.id == resource.data.id;
+      allow delete: if false; // Comments/testimonials cannot be deleted
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow read: if true;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "WikiStars5",
+  "description": "La primera wiki social para calificar y descubrir a los estudiantes más populares e influyentes.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

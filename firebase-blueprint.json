@@ -1,0 +1,73 @@
+{
+  "entities": {
+    "Alumno": {
+      "title": "Alumno",
+      "description": "Un alumno destacado (WikiStar) registrado o nominado en la plataforma.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "nickname": { "type": "string" },
+        "instituteId": { "type": "string" },
+        "avatar": { "type": "string" },
+        "course": { "type": "string" },
+        "category": { "type": "string" },
+        "bio": { "type": "string" },
+        "starsPopularity": { "type": "number" },
+        "starsCharisma": { "type": "number" },
+        "starsTalent": { "type": "number" },
+        "views": { "type": "number" },
+        "points": { "type": "number" },
+        "isVerified": { "type": "boolean" },
+        "instagram": { "type": "string" },
+        "tiktok": { "type": "string" },
+        "nominationReason": { "type": "string" }
+      },
+      "required": ["id", "name", "instituteId", "avatar", "course", "category", "bio", "starsPopularity", "starsCharisma", "starsTalent", "views", "points"]
+    },
+    "AlumnoComment": {
+      "title": "AlumnoComment",
+      "description": "Comentarios o testimonios dejados en la sección de Wiki de un alumno.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "alumnoId": { "type": "string" },
+        "author": { "type": "string" },
+        "avatar": { "type": "string" },
+        "text": { "type": "string" },
+        "status": { "type": "string", "enum": ["anonymous", "student", "verified"] },
+        "createdAt": { "type": "string" },
+        "likes": { "type": "number" }
+      },
+      "required": ["id", "alumnoId", "author", "avatar", "text", "status", "createdAt", "likes"]
+    },
+    "User": {
+      "title": "User",
+      "description": "Información de un usuario registrado en la plataforma, logueado con Google.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "createdAt": { "type": "object" },
+        "lastLogin": { "type": "object" }
+      },
+      "required": ["uid", "displayName", "email", "createdAt", "lastLogin"]
+    }
+  },
+  "firestore": {
+    "/alumnos/{alumnoId}": {
+      "schema": "Alumno",
+      "description": "Colección de todos los alumnos registrados en el sistema."
+    },
+    "/comments/{commentId}": {
+      "schema": "AlumnoComment",
+      "description": "Colección global de todos los comentarios y testimonios estudiantiles."
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Colección de usuarios con pasaportes autenticados por Google."
+    }
+  }
+}
