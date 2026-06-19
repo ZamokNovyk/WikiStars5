@@ -27,7 +27,14 @@ import {
   Shield, 
   Smartphone,
   ExternalLink,
-  Plus
+  Plus,
+  BookOpen,
+  Swords,
+  SlidersHorizontal,
+  List,
+  Grid,
+  HeartCrack,
+  Lock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Institute, Alumno, AlumnoComment } from './types';
@@ -101,6 +108,16 @@ export default function App() {
   const [isSubmittingInstitute, setIsSubmittingInstitute] = useState(false);
 
   const [activeCategoryFilter, setActiveCategoryFilter] = useState<string>('Todos');
+
+  // Campus-specific Navigation & View Modes
+  const [activeCampusTab, setActiveCampusTab] = useState<'Estudiantes' | 'Wiki' | 'Hermoso' | 'Profesores' | 'Versus' | 'Rachas'>('Estudiantes');
+  const [campusViewMode, setCampusViewMode] = useState<'list' | 'grid'>('list'); // Default to list view as shown in the mockup
+  const [studentSortOrder, setStudentSortOrder] = useState<'puntos' | 'nombre' | 'estrellas'>('puntos');
+  const [showShareToast, setShowShareToast] = useState(false);
+  const [professorVotes, setProfessorVotes] = useState<Record<string, number>>({ 'Alberto': 148, 'Carmen': 165 });
+  const [votedVersus, setVotedVersus] = useState<string | null>(null);
+  const [streakClaimed, setStreakClaimed] = useState(false);
+  const [userStreakCount, setUserStreakCount] = useState(2);
 
   // Modals state
   const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
@@ -816,16 +833,29 @@ export default function App() {
           return { al, score, isMatch };
         });
 
-        return scoredPool
+        pool = scoredPool
           .filter(item => item.isMatch && item.score > 0)
           .sort((a, b) => b.score - a.score)
           .map(item => item.al);
       }
     }
 
-    // Sort by points desc
-    return pool.sort((a, b) => b.points - a.points);
-  }, [selectedInstituteId, activeCategoryFilter, studentSearch, alumnos]);
+    // Sort pool according to studentSortOrder
+    const sortedPool = [...pool];
+    if (studentSortOrder === 'puntos') {
+      sortedPool.sort((a, b) => b.points - a.points);
+    } else if (studentSortOrder === 'nombre') {
+      sortedPool.sort((a, b) => a.name.localeCompare(b.name));
+    } else if (studentSortOrder === 'estrellas') {
+      sortedPool.sort((a, b) => {
+        const scoreB = b.starsPopularity + b.starsCharisma + b.starsTalent;
+        const scoreA = a.starsPopularity + a.starsCharisma + a.starsTalent;
+        return scoreB - scoreA;
+      });
+    }
+
+    return sortedPool;
+  }, [selectedInstituteId, activeCategoryFilter, studentSearch, alumnos, studentSortOrder]);
 
   // Top National popular students ranking
   const topNationalAlumnos = useMemo(() => {
@@ -876,6 +906,14 @@ export default function App() {
       case 'Influencer': return 'border-yellow-400/30 text-yellow-400 bg-yellow-400/5 hover:bg-yellow-400/10';
       default: return 'border-zinc-800 text-zinc-300 bg-zinc-900/60 hover:bg-zinc-800';
     }
+  };
+
+  const calcAverageScore = (votesCount: number) => { 
+    return Math.min(5.0, 2.5 + (votesCount / 85)).toFixed(1); 
+  };
+
+  const getApprovalPercent = (votesCount: number) => { 
+    return Math.min(100, Math.floor(45 + (votesCount / 4))); 
   };
 
   return (
@@ -1283,16 +1321,14 @@ export default function App() {
             id="campus-hub-view"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="space-y-6"
           >
-            
-            {/* Navigation back */}
             <button 
               id="btn-back-global"
               onClick={() => {
                 setSelectedInstituteId(null);
                 setActiveCategoryFilter('Todos');
                 setStudentSearch('');
+                setActiveCampusTab('Estudiantes');
               }}
               className="group flex items-center gap-2 text-xs text-zinc-400 hover:text-yellow-400 font-mono tracking-widest font-black uppercase cursor-pointer pb-2 transition-all"
             >
@@ -1301,57 +1337,100 @@ export default function App() {
             </button>
 
             {/* School Profile Hero Cover */}
-            <div className="bg-zinc-950 border border-zinc-900 rounded-3xl overflow-hidden relative shadow-2xl">
-              <div className="h-48 md:h-64 relative bg-zinc-950">
+            <div className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl md:rounded-3xl overflow-hidden relative shadow-2xl">
+              {/* Cover Banner Image with elegant vignette */}
+              <div className="h-40 md:h-56 relative bg-gradient-to-b from-zinc-900 to-zinc-950">
                 <img 
                   src={currentSelectedInstitute.image} 
                   alt={currentSelectedInstitute.name} 
-                  className="w-full h-full object-cover opacity-50" 
+                  className="w-full h-full object-cover opacity-45" 
                 />
-                <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/40 to-transparent" />
+                <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/20 to-transparent" />
                 
-                {/* Visual float elements */}
-                <div className="absolute bottom-6 left-6 md:left-10 flex flex-col md:flex-row md:items-end justify-between right-6 md:right-10 gap-4">
-                  <div>
-                    <span className="text-[9px] text-yellow-400 font-mono tracking-widest font-black uppercase bg-yellow-400/10 border border-yellow-400/30 px-3 py-1 rounded-lg inline-block mb-3 shadow-md">
+                {/* Float elements right */}
+                <div className="absolute top-4 right-4 z-20 flex gap-2">
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(window.location.href);
+                      setShowShareToast(true);
+                      setTimeout(() => setShowShareToast(false), 2000);
+                    }}
+                    className="p-2.5 rounded-full bg-zinc-950/80 hover:bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-400 hover:text-yellow-400 transition-all shadow-lg active:scale-95 cursor-pointer"
+                    title="Compartir campus"
+                  >
+                    <Share2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Share Success Toast notifier */}
+              <AnimatePresence>
+                {showShareToast && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                    className="absolute top-6 left-1/2 -translate-x-1/2 bg-yellow-400 text-black font-mono text-xs font-black px-4 py-2 rounded-xl shadow-2xl z-50 flex items-center gap-1.5 border border-yellow-300"
+                  >
+                    <span>¡ENLACE COPIADO AL PORTAPAPELES! 🔗</span>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Overlapping Info block matching layout */}
+              <div className="px-6 pb-6 pt-2 md:px-10 md:pb-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 relative z-10">
+                
+                {/* Left side: Avatar + Title with flex-row */}
+                <div className="flex flex-col md:flex-row md:items-center gap-5 -mt-10 md:-mt-14 w-full md:w-auto">
+                  
+                  {/* Dynamic Big Circular Avatar with Letter "I" */}
+                  <div className="w-20 h-20 md:w-28 md:h-28 rounded-full bg-[#161618] border-4 border-[#050505] flex items-center justify-center text-zinc-450 font-mono font-black text-3xl md:text-5xl shadow-2xl shrink-0 selection:bg-transparent select-none select-none text-zinc-450 text-white">
+                    {currentSelectedInstitute.name ? currentSelectedInstitute.name.charAt(0).toUpperCase() : 'I'}
+                  </div>
+
+                  <div className="space-y-1.5 max-w-xl">
+                    <span className="text-[9px] text-yellow-400 font-mono tracking-widest font-black uppercase bg-yellow-400/10 border border-yellow-400/30 px-3 py-1 rounded-lg inline-block mb-3 shadow-sm">
                       CAMPUS ACTIVO DE ESTUDIOS
                     </span>
-                    <h2 className="text-2xl sm:text-4xl font-display font-black text-white uppercase tracking-tight">
+                    <h2 className="text-xl md:text-3xl font-display font-black text-white uppercase tracking-tight leading-snug">
                       {currentSelectedInstitute.name}
                     </h2>
-                    <p className="text-zinc-300 text-xs mt-1.5 font-mono font-medium flex items-center gap-1.5">
+                    <p className="text-zinc-400 text-xs font-mono font-medium flex items-center gap-1.5">
                       <MapPin className="w-3.5 h-3.5 text-yellow-400" />
                       {currentSelectedInstitute.location}
                     </p>
                   </div>
-                  <div className="flex gap-4">
-                    <div className="bg-zinc-950/90 border border-zinc-900 px-5 py-3 rounded-2xl text-center shadow-lg min-w-[90px]">
-                      <span className="block text-[8px] text-zinc-500 font-mono font-bold uppercase tracking-wider">Estrellas</span>
-                      <span className="text-base font-black text-white font-mono">
-                        {alumnos.filter(a => a.instituteId === selectedInstituteId).length}
-                      </span>
-                    </div>
-                    <div className="bg-zinc-950/90 border border-zinc-900 px-5 py-3 rounded-2xl text-center shadow-lg min-w-[110px]">
-                      <span className="block text-[8px] text-zinc-500 font-mono font-bold uppercase tracking-wider">Promedio campus</span>
-                      <span className="text-base font-black text-yellow-405 text-yellow-400 font-mono flex items-center gap-0.5 justify-center">
-                        ★ {currentSelectedInstitute.ratingAverage}
-                      </span>
-                    </div>
+                </div>
+
+                {/* Right side: quick stats columns */}
+                <div className="flex gap-4 self-stretch md:self-auto justify-between md:justify-start shrink-0">
+                  <div className="bg-[#121214]/60 border border-zinc-900/80 px-4 py-2.5 rounded-2xl text-center shadow-md min-w-[75px] md:min-w-[90px]">
+                    <span className="block text-[8px] text-zinc-500 font-mono font-black uppercase tracking-wider">Estrellas</span>
+                    <span className="text-sm md:text-base font-black text-white font-mono">
+                      {alumnos.filter(a => a.instituteId === selectedInstituteId).length}
+                    </span>
+                  </div>
+                  <div className="bg-[#121214]/60 border border-zinc-900/80 px-4 py-2.5 rounded-2xl text-center shadow-md min-w-[95px] md:min-w-[110px]">
+                    <span className="block text-[8px] text-zinc-500 font-mono font-black uppercase tracking-wider">Promedio</span>
+                    <span className="text-sm md:text-base font-black text-yellow-400 font-mono flex items-center gap-0.5 justify-center">
+                      ★ {currentSelectedInstitute.ratingAverage}
+                    </span>
                   </div>
                 </div>
+
               </div>
 
               {/* Description bar */}
-              <div className="p-6 bg-zinc-950 border-t border-zinc-900/60 text-xs sm:text-sm text-zinc-400 leading-relaxed md:flex md:items-center justify-between gap-8">
-                <span className="block max-w-3xl font-sans font-medium text-zinc-400">
-                  {currentSelectedInstitute.description}
+              <div className="px-6 md:px-10 py-5 bg-[#0e0e10]/80 border-t border-zinc-900/60 text-xs text-zinc-400 leading-relaxed flex flex-col md:flex-row md:items-center justify-between gap-6">
+                <span className="block max-w-2xl font-sans font-medium text-zinc-400">
+                  {currentSelectedInstitute.description || 'Este instituto de calidad ofrece disciplinas y carreras profesionales en constante innovación académica.'}
                 </span>
                 
                 {/* Nominate button */}
                 <button
                   id="btn-nominate-student"
                   onClick={() => setIsNominateModalOpen(true)}
-                  className="mt-4 md:mt-0 bg-yellow-400 text-black hover:bg-yellow-300 font-black text-xs px-6 py-3.5 rounded-full flex items-center justify-center gap-2.5 transition-all duration-300 font-mono tracking-wider shadow-[0_4px_20px_rgba(250,204,21,0.25)] hover:shadow-[0_4px_25px_rgba(250,204,21,0.45)] shrink-0 hover:-translate-y-0.5 cursor-pointer uppercase"
+                  className="bg-yellow-400 text-black hover:bg-yellow-300 font-black text-[11px] px-5 py-3 rounded-full flex items-center justify-center gap-2 transition-all duration-300 font-mono tracking-wider shadow-[0_4px_15px_rgba(250,204,21,0.2)] hover:shadow-[0_4px_20px_rgba(250,204,21,0.35)] hover:-translate-y-0.5 active:translate-y-0 cursor-pointer uppercase shrink-0"
                 >
                   <PlusCircle className="w-4 h-4 text-black" />
                   NOMINAR UNA ESTRELLA 🌟
@@ -1359,180 +1438,807 @@ export default function App() {
               </div>
             </div>
 
-            {/* Search and Category Filters Inside Campus */}
-            <div className="bg-[#0b0b0b] border border-zinc-900 rounded-2xl p-4 sm:p-5 space-y-4">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                
-                {/* Mini Search input */}
-                <div className="relative flex-1 max-w-md group">
-                  <div className="absolute inset-y-0 left-3 flex items-center text-zinc-400 group-focus-within:text-yellow-400">
-                    <Search className="w-4 h-4" />
-                  </div>
-                  <input
-                    id="campus-search-input"
-                    type="text"
-                    value={studentSearch}
-                    onChange={(e) => setStudentSearch(e.target.value)}
-                    placeholder="Filtrar alumnos por nombre o curso..."
-                    className="w-full bg-[#121212] focus:bg-[#161616] border border-zinc-800 focus:border-yellow-400/50 text-xs py-2.5 pl-9 pr-4 rounded-xl text-zinc-200 outline-none placeholder-zinc-500 transition-colors"
-                  />
-                  {studentSearch && (
-                    <button 
-                      onClick={() => setStudentSearch('')}
-                      className="absolute inset-y-0 right-3 flex items-center text-zinc-500 hover:text-white"
-                    >
-                      <X className="w-3" />
-                    </button>
-                  )}
-                </div>
-
-                <div className="text-[11px] font-mono text-zinc-500 text-right">
-                  Mostrando <span className="text-zinc-200 font-bold">{filteredAlumnosInCampus.length}</span> estudiantes
-                </div>
+            {/* HIGH-FIDELITY SEARCH BAR (from standard reference) */}
+            <div className="relative group">
+              <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none text-zinc-500 group-focus-within:text-yellow-400 transition-colors z-10">
+                <Search className="w-4 h-4" />
               </div>
-
-              {/* Category selector pills */}
-              <div className="flex items-center gap-2 overflow-x-auto pb-1 select-none">
-                <span className="text-[10px] uppercase font-mono font-bold text-zinc-500 mr-2 shrink-0">Categoría:</span>
-                {['Todos', 'Artista', 'Deportista', 'Académico', 'Influencer', 'Gaming', 'Líder'].map(cat => {
-                  const isActive = activeCategoryFilter === cat;
-                  return (
-                    <button
-                      key={cat}
-                      onClick={() => setActiveCategoryFilter(cat)}
-                      className={`text-xs px-3 py-1.5 rounded-full border transition-all shrink-0 font-mono ${
-                        isActive 
-                          ? 'bg-yellow-400 text-black border-yellow-400 font-bold shadow-md' 
-                          : getCategoryThemeColor(cat as Alumno['category'])
-                      }`}
-                    >
-                      {cat}
-                    </button>
-                  );
-                })}
-              </div>
+              <input
+                id="campus-search-input-mockup"
+                type="text"
+                value={studentSearch}
+                onChange={(e) => {
+                  setStudentSearch(e.target.value);
+                  if (activeCampusTab !== 'Estudiantes') {
+                    setActiveCampusTab('Estudiantes');
+                  }
+                }}
+                placeholder="Buscar estudiante o profesor..."
+                className="w-full bg-[#0d0d0f] focus:bg-[#121215] border border-zinc-900 focus:border-yellow-400/40 text-xs sm:text-sm py-3.5 pl-11 pr-4 rounded-xl text-zinc-200 outline-none placeholder-zinc-500/85 transition-colors shadow-2xl font-mono duration-200 focus:ring-1 focus:ring-yellow-400/20"
+              />
+              {studentSearch && (
+                <button 
+                  onClick={() => setStudentSearch('')}
+                  className="absolute inset-y-0 right-4 flex items-center text-zinc-500 hover:text-white"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
             </div>
 
-            {/* List of Student entries in Campus */}
-            {filteredAlumnosInCampus.length === 0 ? (
-              <div id="no-students-fallback" className="bg-[#0b0b0b] border border-zinc-900 border-dashed rounded-3xl p-16 text-center text-zinc-500 space-y-4">
-                <Users className="w-12 h-12 text-zinc-600 mx-auto animate-pulse" />
-                <h4 className="font-display font-bold text-white text-base">Aún no hay estrellas de esta categoría</h4>
-                <p className="text-xs max-w-md mx-auto">
-                  Sé el primero en postular o nominar al alumno más popular de esta categoría en tu división. ¡Presiona "Nominar una Estrella 🌟" arriba!
-                </p>
-                <button
-                  onClick={() => setIsNominateModalOpen(true)}
-                  className="bg-zinc-900 border border-zinc-800 text-yellow-400 text-xs px-3.5 py-2 rounded-xl hover:bg-zinc-800 transition-all font-mono"
+            {/* MOCKUP SUB-TABS STRIP (Direct alignment to reference screen) */}
+            <div className="bg-[#0b0b0c] border border-zinc-900 border-y py-1.5 overflow-x-auto flex items-center gap-1.5 scrollbar-none rounded-xl px-2">
+              {[
+                { id: 'Wiki', label: 'Wiki', icon: <BookOpen className="w-3.5 h-3.5" /> },
+                { id: 'Estudiantes', label: 'Estudiantes', icon: <Users className="w-3.5 h-3.5" /> },
+                { id: 'Hermoso', label: 'Hermoso', icon: <Heart className="w-3.5 h-3.5" /> },
+                { id: 'Profesores', label: 'Profesores', icon: <Shield className="w-3.5 h-3.5" /> },
+                { id: 'Versus', label: 'Versus de profesores', icon: <Swords className="w-3.5 h-3.5" /> },
+                { id: 'Rachas', label: 'Rachas', icon: <Flame className="w-3.5 h-3.5" /> },
+              ].map(tab => {
+                const isActive = activeCampusTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => {
+                      setActiveCampusTab(tab.id as any);
+                    }}
+                    className={`flex items-center gap-2 text-xs px-4 py-2.5 rounded-xl transition-all duration-300 font-mono font-bold whitespace-nowrap uppercase cursor-pointer ${
+                      isActive 
+                        ? 'bg-[#fbbf24] text-black shadow-md font-black ring-1 ring-amber-400' 
+                        : 'text-zinc-400 hover:text-zinc-200 hover:bg-[#121215]'
+                    }`}
+                  >
+                    {tab.icon}
+                    <span>{tab.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* TARGET CONTENT CONTAINER PANEL */}
+            <AnimatePresence mode="wait">
+              
+              {/* TAB 1: ESTUDIANTES */}
+              {activeCampusTab === 'Estudiantes' && (
+                <motion.div
+                  key="tab-estudiantes-panel"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  className="space-y-4"
                 >
-                  Nominar Estudiante
-                </button>
-              </div>
-            ) : (
-              <div id="students-grid" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredAlumnosInCampus.map((al, index) => {
-                  return (
-                    <motion.div
-                      key={al.id}
-                      initial={{ opacity: 0, y: 12 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: index * 0.05 }}
-                      whileHover={{ y: -5 }}
-                      className="bg-zinc-950 border border-zinc-900 hover:border-yellow-400/35 rounded-3xl p-5 relative overflow-hidden flex flex-col justify-between shadow-2xl transition-all duration-300 hover:shadow-[0_12px_30px_rgba(250,204,21,0.05)]"
-                    >
-                      {/* Top banner rating badges */}
-                      <div className="flex items-start justify-between gap-2">
-                        {/* Course info */}
-                        <div className="text-[10px] font-mono font-bold bg-zinc-900 border border-zinc-805 border-zinc-800/80 px-2.5 py-1 rounded-lg text-zinc-400 max-w-[180px] truncate">
-                          {al.course.split(' - ')[0]}
-                        </div>
-                        
-                        {/* Vote count */}
-                        <div className="text-[9px] font-mono font-black text-yellow-400 bg-yellow-400/10 border border-yellow-400/20 px-2.5 py-1 rounded-lg flex items-center gap-1 shrink-0 shadow-sm">
-                          <Flame className="w-3.5 h-3.5 text-amber-500 fill-current animate-pulse" />
-                          <span className="font-extrabold">{al.points} pt</span>
-                        </div>
+                  {/* Secondary control drawer: categories + sorting + view toggles */}
+                  <div className="bg-[#08080a]/90 border border-zinc-900/65 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    
+                    {/* Category quick selectors */}
+                    <div className="flex items-center gap-2 overflow-x-auto pb-1.5 md:pb-0 scrollbar-none select-none">
+                      <span className="text-[10px] uppercase font-mono font-black text-zinc-500 mr-1.5 shrink-0">Categoría:</span>
+                      {['Todos', 'Artista', 'Deportista', 'Académico', 'Influencer', 'Gaming', 'Líder'].map(cat => {
+                        const isCatActive = activeCategoryFilter === cat;
+                        return (
+                          <button
+                            key={cat}
+                            onClick={() => setActiveCategoryFilter(cat)}
+                            className={`text-[11px] px-3 py-1.5 rounded-xl border transition-all shrink-0 font-mono tracking-wide ${
+                              isCatActive 
+                                ? 'bg-[#fbbf24] text-black border-[#fbbf24] font-bold shadow' 
+                                : getCategoryThemeColor(cat as Alumno['category'])
+                            }`}
+                          >
+                            {cat}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* View mode toggle + Ordering */}
+                    <div className="flex items-center gap-3 shrink-0 self-end md:self-auto">
+                      
+                      {/* Sort selection button */}
+                      <div className="flex items-center gap-1.5 bg-[#0f0f12] border border-zinc-900 p-1.5 rounded-xl">
+                        <SlidersHorizontal className="w-3.5 h-3.5 text-zinc-500 ml-1" />
+                        <span className="text-[9px] font-mono font-black text-zinc-500 uppercase">Orden:</span>
+                        <select
+                          value={studentSortOrder}
+                          onChange={(e) => setStudentSortOrder(e.target.value as any)}
+                          className="bg-transparent border-none text-[10px] font-mono font-black text-zinc-300 outline-none pr-1.5 cursor-pointer hover:text-yellow-400 uppercase"
+                        >
+                          <option value="puntos" className="bg-[#0f0f12]">PUNTOS</option>
+                          <option value="nombre" className="bg-[#0f0f12]">NOMBRE</option>
+                          <option value="estrellas" className="bg-[#0f0f12]">RATING</option>
+                        </select>
                       </div>
 
-                      {/* Main profile section */}
-                      <div className="mt-4 flex items-start gap-4">
-                        <img 
-                          src={al.avatar} 
-                          alt={al.name} 
-                          referrerPolicy="no-referrer"
-                          className="w-14 h-14 rounded-full object-cover border-2 border-yellow-400/30 shrink-0 shadow-md" 
-                        />
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <h4 className="font-display font-black text-sm text-zinc-100 uppercase tracking-tight capitalize">
-                              {al.name}
-                            </h4>
-                            {al.isVerified && <CheckCircle2 className="w-3.5 h-3.5 text-yellow-400 shrink-0" />}
-                          </div>
-                          {al.nickname && (
-                            <span className="text-[10px] text-yellow-500 font-mono font-semibold">@{al.nickname}</span>
-                          )}
-                          
-                          {/* Category Badge with icon */}
-                          <div className="flex items-center gap-1.5 mt-1.5">
-                            <span className="p-0.5 rounded bg-zinc-900 inline-block border border-zinc-900">
-                              {getCategoryIcon(al.category)}
-                            </span>
-                            <span className="text-[9px] font-mono text-zinc-400 tracking-wider uppercase font-bold">
-                              {al.category}
-                            </span>
-                          </div>
-                        </div>
+                      {/* Display toggle mode icons */}
+                      <div className="flex items-center bg-[#09090b] border border-zinc-900 p-1 rounded-xl gap-1">
+                        <button
+                          onClick={() => setCampusViewMode('list')}
+                          className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                            campusViewMode === 'list' 
+                              ? 'bg-[#fbbf24] text-black shadow-md' 
+                              : 'text-zinc-500 hover:text-zinc-300'
+                          }`}
+                          title="Vista de Lista"
+                        >
+                          <List className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => setCampusViewMode('grid')}
+                          className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                            campusViewMode === 'grid' 
+                              ? 'bg-[#fbbf24] text-black shadow-md' 
+                              : 'text-zinc-500 hover:text-zinc-300'
+                          }`}
+                          title="Vista de Mosaico"
+                        >
+                          <Grid className="w-3.5 h-3.5" />
+                        </button>
                       </div>
 
-                      {/* Snippet and details */}
-                      <p className="mt-4 text-[11px] text-zinc-400 leading-relaxed italic line-clamp-2 font-sans font-medium">
-                        "{al.bio}"
+                    </div>
+                  </div>
+
+                  {/* Empty state or render */}
+                  {filteredAlumnosInCampus.length === 0 ? (
+                    <div id="no-students-fallback" className="bg-[#0b0b0c] border border-zinc-900 border-dashed rounded-2xl p-16 text-center text-zinc-500 space-y-4">
+                      <Users className="w-10 h-10 text-zinc-650 mx-auto animate-pulse" />
+                      <h4 className="font-display font-bold text-white text-base">Aún no hay estrellas registradas</h4>
+                      <p className="text-xs max-w-sm mx-auto text-zinc-400">
+                        Sé el primero en postular o nominar al alumno con más influencia o talento para esta categoría.
+                      </p>
+                      <button
+                        onClick={() => setIsNominateModalOpen(true)}
+                        className="bg-yellow-400 text-black text-xs px-4 py-2 rounded-xl transition-all font-mono font-bold cursor-pointer"
+                      >
+                        Nominar Alumno
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      {/* HIGH-FIDELITY LIST VIEW RENDER matching reference cover screenshot */}
+                      {campusViewMode === 'list' ? (
+                        <div className="space-y-2.5">
+                          {filteredAlumnosInCampus.map((al, index) => {
+                            // Extract initials
+                            const initials = al.name
+                              ?.split(' ')
+                              .filter(Boolean)
+                              .map(part => part[0])
+                              .slice(0, 2)
+                              .join('')
+                              .toUpperCase() || 'S';
+
+                            return (
+                              <motion.div
+                                key={al.id}
+                                initial={{ opacity: 0, x: -8 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                transition={{ delay: index * 0.03 }}
+                                className="bg-[#0b0b0c] hover:bg-zinc-950/70 border border-zinc-900/80 hover:border-zinc-800/80 p-4 rounded-xl flex items-center justify-between gap-4 transition-all duration-200 group hover:shadow-[0_4px_20px_rgba(250,204,21,0.02)]"
+                              >
+                                {/* Left side layout: index, initials avatar, name and sub metrics */}
+                                <div className="flex items-center gap-3 min-w-0">
+                                  {/* Rank Number Circle */}
+                                  <div className="w-7 h-7 rounded-full bg-[#121214] border border-zinc-850 text-[11px] text-zinc-500 font-mono font-bold flex items-center justify-center shrink-0">
+                                    {index + 1}
+                                  </div>
+
+                                  {/* Student Letter initials Avatar Circle */}
+                                  {al.avatar && !al.avatar.includes('placeholder') ? (
+                                    <img 
+                                      src={al.avatar} 
+                                      alt={al.name}
+                                      referrerPolicy="no-referrer"
+                                      className="w-10 h-10 rounded-full object-cover border border-zinc-800 shrink-0 shadow-sm"
+                                    />
+                                  ) : (
+                                    <div className="w-10 h-10 rounded-full bg-[#121214] border border-zinc-855 flex items-center justify-center font-mono font-bold text-xs text-yellow-405 text-yellow-400 shrink-0">
+                                      {initials}
+                                    </div>
+                                  )}
+
+                                  {/* Name, nickname, verification, and sub row */}
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-1.5">
+                                      <h3 
+                                        onClick={() => {
+                                          setSelectedAlumnoId(al.id);
+                                          window.scrollTo({ top: 300, behavior: 'smooth' });
+                                        }}
+                                        className="font-sans font-bold text-zinc-100 hover:text-yellow-400 cursor-pointer transition-colors text-sm truncate uppercase tracking-tight"
+                                      >
+                                        {al.name}
+                                      </h3>
+                                      {al.isVerified && <CheckCircle2 className="w-3.5 h-3.5 text-yellow-400 shrink-0" />}
+                                    </div>
+
+                                    {/* Interactive Metrics Row from user uploaded reference */}
+                                    <div className="flex items-center gap-3 mt-1 text-[11px] font-mono text-zinc-500 font-medium">
+                                      {/* Heart / Flame votes points */}
+                                      <div className="flex items-center gap-1">
+                                        <Heart className="w-3 h-3 text-pink-500 fill-pink-500/25" />
+                                        <span>{al.points}</span>
+                                      </div>
+                                      {/* Group / views icon */}
+                                      <div className="flex items-center gap-1">
+                                        <Users className="w-3.5 h-3.5 text-sky-400" />
+                                        <span>{al.views || Math.floor((al.points * 3.4) + 12)}</span>
+                                      </div>
+                                      {/* Hearts cracked (dislikes) - constant 0 as in mockup */}
+                                      <div className="flex items-center gap-1">
+                                        <HeartCrack className="w-3 h-3 text-zinc-650 text-zinc-600" />
+                                        <span>0</span>
+                                      </div>
+                                      {/* Course Tag */}
+                                      <span className="hidden sm:inline-block text-[9px] bg-zinc-900 px-2 py-0.5 rounded text-zinc-400 border border-zinc-800/40">
+                                        {al.course.split(' - ')[0]}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Right side layout: rating indicator & trigger to view profile */}
+                                <div className="flex items-center gap-4 shrink-0">
+                                  {/* Golden Average Rating Tag */}
+                                  <div className="text-right">
+                                    <span className="text-xs font-black text-yellow-400 font-mono flex items-center gap-1 bg-yellow-400/5 px-2.5 py-1 rounded-lg border border-yellow-400/20 shadow-inner">
+                                      ★ {al.starsPopularity ? al.starsPopularity.toFixed(1) : "0.0"}
+                                    </span>
+                                  </div>
+
+                                  {/* Quick action profile check button */}
+                                  <button
+                                    onClick={() => {
+                                      setSelectedAlumnoId(al.id);
+                                      window.scrollTo({ top: 300, behavior: 'smooth' });
+                                    }}
+                                    className="hidden sm:block text-[10px] font-mono font-black text-[#a1a1aa] hover:text-yellow-400 border border-zinc-805 hover:border-yellow-400/30 px-3 py-1.5 rounded-lg bg-zinc-900/40 transition-colors uppercase cursor-pointer"
+                                  >
+                                    Ver Wiki
+                                  </button>
+                                </div>
+                              </motion.div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        /* BENTO GRID VISTA DE MOSAICO (Original high-card visual bento rendering) */
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                          {filteredAlumnosInCampus.map((al, index) => {
+                            return (
+                              <motion.div
+                                key={al.id}
+                                initial={{ opacity: 0, y: 12 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: index * 0.05 }}
+                                whileHover={{ y: -5 }}
+                                className="bg-[#0b0b0d] border border-zinc-900 hover:border-yellow-400/35 rounded-2xl p-5 relative overflow-hidden flex flex-col justify-between shadow-2xl transition-all duration-300 hover:shadow-[0_12px_30px_rgba(250,204,21,0.04)]"
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="text-[10px] font-mono font-bold bg-zinc-900 border border-zinc-800/80 px-2.5 py-1 rounded-lg text-zinc-400 max-w-[180px] truncate">
+                                    {al.course.split(' - ')[0]}
+                                  </div>
+                                  <div className="text-[9px] font-mono font-black text-yellow-400 bg-yellow-400/10 border border-yellow-400/20 px-2.5 py-1 rounded-lg flex items-center gap-1 shrink-0 shadow-sm">
+                                    <Flame className="w-3.5 h-3.5 text-amber-500 fill-current animate-pulse" />
+                                    <span>{al.points} pt</span>
+                                  </div>
+                                </div>
+
+                                <div className="mt-4 flex items-start gap-3.5">
+                                  {al.avatar && !al.avatar.includes('placeholder') ? (
+                                    <img 
+                                      src={al.avatar} 
+                                      alt={al.name} 
+                                      referrerPolicy="no-referrer"
+                                      className="w-12 h-12 rounded-full object-cover border-2 border-yellow-400/30 shrink-0 shadow-md" 
+                                    />
+                                  ) : (
+                                    <div className="w-12 h-12 rounded-full bg-zinc-900 border-2 border-zinc-800 flex items-center justify-center font-mono font-bold text-xs text-yellow-500 shrink-0 shadow-md uppercase">
+                                      {al.name.split(' ').map(n=>n[0]).slice(0,2).join('')}
+                                    </div>
+                                  )}
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <h4 
+                                        onClick={() => {
+                                          setSelectedAlumnoId(al.id);
+                                          window.scrollTo({ top: 300, behavior: 'smooth' });
+                                        }}
+                                        className="font-sans font-bold text-sm text-zinc-100 hover:text-yellow-400 transition-colors uppercase tracking-tight truncate cursor-pointer"
+                                      >
+                                        {al.name}
+                                      </h4>
+                                      {al.isVerified && <CheckCircle2 className="w-3.5 h-3.5 text-yellow-400 shrink-0" />}
+                                    </div>
+                                    {al.nickname && (
+                                      <span className="text-[10px] text-yellow-500 font-mono font-semibold">@{al.nickname}</span>
+                                    )}
+                                    <div className="flex items-center gap-1.5 mt-1.5">
+                                      <span className="p-0.5 rounded bg-zinc-900 inline-block border border-zinc-800">
+                                        {getCategoryIcon(al.category)}
+                                      </span>
+                                      <span className="text-[9px] font-mono text-zinc-400 tracking-wider uppercase font-black">
+                                        {al.category}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <p className="mt-3.5 text-[11px] text-zinc-400 leading-relaxed italic line-clamp-2 font-sans font-medium">
+                                  "{al.bio || 'Sin biografía disponible. ¡Postula o edita su ficha!'}"
+                                </p>
+
+                                <div className="mt-4 pt-3.5 border-t border-zinc-900/60 grid grid-cols-3 gap-1.5 text-center text-[10px] font-mono text-zinc-500">
+                                  <div className="bg-zinc-900/30 border border-zinc-900/50 p-2 rounded-xl">
+                                    <span className="block text-[8px] text-zinc-500 font-bold uppercase tracking-wide">Popu</span>
+                                    <span className="text-white font-black text-xs">★ {al.starsPopularity?.toFixed(1) || '0.0'}</span>
+                                  </div>
+                                  <div className="bg-zinc-900/30 border border-zinc-900/50 p-2 rounded-xl">
+                                    <span className="block text-[8px] text-zinc-500 font-bold uppercase tracking-wide">Caris</span>
+                                    <span className="text-white font-black text-xs">★ {al.starsCharisma?.toFixed(1) || '0.0'}</span>
+                                  </div>
+                                  <div className="bg-zinc-900/30 border border-zinc-900/50 p-2 rounded-xl">
+                                    <span className="block text-[8px] text-zinc-500 font-bold uppercase tracking-wide">Talen</span>
+                                    <span className="text-white font-black text-xs">★ {al.starsTalent?.toFixed(1) || '0.0'}</span>
+                                  </div>
+                                </div>
+
+                                <div className="mt-4 pt-1.5 flex gap-2">
+                                  <button
+                                    onClick={() => handleUpvote(al.id)}
+                                    className="flex-1 bg-yellow-400 hover:bg-yellow-300 text-black text-[11px] font-mono font-black py-2.5 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-md shadow-yellow-400/10 hover:-translate-y-0.5 active:translate-y-0"
+                                  >
+                                    <Flame className="w-3.5 h-3.5 text-amber-600 fill-current" />
+                                    <span>VOTAR</span>
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setSelectedAlumnoId(al.id);
+                                      window.scrollTo({ top: 300, behavior: 'smooth' });
+                                    }}
+                                    className="flex-1 bg-zinc-900 hover:bg-zinc-800 text-zinc-100 border border-zinc-800 hover:border-zinc-700 text-[11px] font-mono font-bold py-2.5 rounded-xl transition-all text-center cursor-pointer hover:-translate-y-0.5"
+                                  >
+                                    VER WIKI
+                                  </button>
+                                </div>
+                              </motion.div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </motion.div>
+              )}
+
+              {/* TAB 2: WIKI DETAILED INFO */}
+              {activeCampusTab === 'Wiki' && (
+                <motion.div
+                  key="tab-wiki-panel"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  className="bg-[#0b0b0c] border border-zinc-900 p-5 sm:p-8 rounded-2xl space-y-6"
+                >
+                  <div className="border-b border-zinc-800 pb-5">
+                    <h3 className="font-display font-black text-lg text-white uppercase tracking-wider flex items-center gap-2">
+                      <BookOpen className="w-5 h-5 text-[#fbbf24]" />
+                      WIKI-CAMPUS DATABASE: {currentSelectedInstitute.name}
+                    </h3>
+                    <p className="text-xs text-zinc-400 mt-2 font-mono">
+                      Última sincronización comunitaria realizada hace pocos minutos • Datos 100% moderados democráticamente.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="md:col-span-2 space-y-5">
+                      <div>
+                        <h4 className="font-sans font-black text-sm text-zinc-200 uppercase tracking-tight">Descripción Oficial de la Entidad</h4>
+                        <p className="text-zinc-400 text-xs sm:text-sm mt-3 leading-relaxed">
+                          {currentSelectedInstitute.description || 'El centro formativo representa un pilar regional en la instrucción pedagógica superior, técnica o académica de los estudiantes locales. A través del registro social en la plataforma WikiStars, los estudiantes construyen activamente su identidad compartida, destacando las habilidades y el perfil biográfico de los líderes en cada área.'}
+                        </p>
+                      </div>
+
+                      <div className="bg-zinc-900/40 border border-zinc-900 p-4 rounded-xl space-y-3">
+                        <h4 className="font-sans font-bold text-xs text-yellow-400 uppercase tracking-widest font-mono">
+                          ✓ MÁS INFORMACIÓN CON VALOR PEDAGÓGICO
+                        </h4>
+                        <ul className="text-xs text-zinc-400 space-y-2 list-disc list-inside leading-relaxed font-sans font-medium">
+                          <li>Sede de Formación docente especializada con altos estándares en la región de Uchiza.</li>
+                          <li>Fomento al desarrollo Artístico, Deportivo y Tecnológico del alumnado.</li>
+                          <li>Organismo con representación provincial en eventos intelectuales destacados.</li>
+                          <li>Comunidad estudiantil unida para rescatar la excelencia local.</li>
+                        </ul>
+                      </div>
+                    </div>
+
+                    {/* Stats table */}
+                    <div className="bg-[#0f0f12] border border-zinc-900 p-5 rounded-2xl space-y-4 h-fit">
+                      <h4 className="font-mono text-xs font-black text-zinc-400 uppercase tracking-wider">Estadísticas de la Ficha</h4>
+                      <div className="space-y-3 border-t border-zinc-900 pt-3 text-xs font-mono">
+                        <div className="flex justify-between">
+                          <span className="text-zinc-500">Estrellas Registradas</span>
+                          <span className="text-white font-black">{alumnos.filter(a => a.instituteId === selectedInstituteId).length}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-zinc-500">Categoría Popular</span>
+                          <span className="text-yellow-400 font-bold uppercase">{currentSelectedInstitute.popularCategory || 'Académico'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-zinc-500">Promedio General</span>
+                          <span className="text-zinc-300 font-bold">★ {currentSelectedInstitute.ratingAverage}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-zinc-500">Votos Emitidos</span>
+                          <span className="text-white font-black">
+                            {alumnos.filter(a => a.instituteId === selectedInstituteId).reduce((acc, currentVal) => acc + currentVal.points, 0)} votos
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* TAB 3: HERMOSO (Hall of fame) */}
+              {activeCampusTab === 'Hermoso' && (
+                <motion.div
+                  key="tab-hermoso-panel"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  className="space-y-6"
+                >
+                  <div className="bg-gradient-to-r from-[#0d0d10] to-yellow-950/20 border border-yellow-500/20 p-6 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <h3 className="font-display font-black text-lg text-yellow-500 uppercase tracking-widest flex items-center gap-2">
+                        <Crown className="w-5 h-5 text-yellow-400 animate-pulse animate-bounce" />
+                        MURO DE CARISMA & BEAUTY ESTELAR
+                      </h3>
+                      <p className="text-xs text-zinc-400 font-sans font-medium">
+                        Nominados más destacados en carisma social, estética expresiva y popularidad de la comunidad.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Top rated per charisma stars list */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {alumnos
+                      .filter(a => a.instituteId === selectedInstituteId)
+                      .sort((a,b) => b.starsCharisma - a.starsCharisma)
+                      .slice(0, 3)
+                      .map((al, index) => {
+                        const crownColors = ['text-yellow-400', 'text-zinc-400', 'text-amber-600'];
+                        return (
+                          <div
+                            key={al.id}
+                            className="bg-[#0b0b0c] border border-yellow-500/10 rounded-2xl p-5 relative overflow-hidden flex flex-col justify-between hover:shadow-[0_4px_30px_rgba(250,204,21,0.05)] transition-all"
+                          >
+                            <div className="absolute top-0 right-0 w-24 h-24 bg-yellow-400/2 rounded-full blur-xl pointer-events-none" />
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] uppercase font-mono font-black text-yellow-400 bg-yellow-400/10 px-2 py-0.5 rounded border border-yellow-400/20">
+                                PODIO {index + 1}
+                              </span>
+                              <Crown className={`w-5 h-5 ${crownColors[index] || 'text-yellow-400'}`} />
+                            </div>
+
+                            <div className="mt-4 flex items-center gap-3">
+                              {al.avatar && !al.avatar.includes('placeholder') ? (
+                                <img 
+                                  src={al.avatar} 
+                                  alt={al.name} 
+                                  className="w-12 h-12 rounded-full object-cover border-2 border-yellow-400/50 shrink-0"
+                                />
+                              ) : (
+                                <div className="w-12 h-12 rounded-full bg-[#121214] border-2 border-yellow-400/30 flex items-center justify-center font-mono font-black text-sm text-yellow-400 shrink-0 uppercase">
+                                  {al.name.split(' ').map(n=>n[0]).slice(0,2).join('')}
+                                </div>
+                              )}
+                              <div className="min-w-0">
+                                <h4 className="font-sans font-bold text-sm text-white uppercase tracking-tight truncate">{al.name}</h4>
+                                <span className="text-[10px] text-zinc-400 font-mono italic">Promedio Carisma: ★ {al.starsCharisma}</span>
+                              </div>
+                            </div>
+
+                            <p className="mt-4 text-xs italic text-zinc-400 font-medium leading-relaxed">"{al.bio || 'Una de las personalidades más queridas y carismáticas del campus.'}"</p>
+
+                            <div className="mt-4 pt-3.5 border-t border-zinc-900 flex justify-between items-center">
+                              <span className="text-[11px] font-mono text-zinc-500">Puntaje global: <strong className="text-white">{al.points} pt</strong></span>
+                              <button
+                                onClick={() => {
+                                  setSelectedAlumnoId(al.id);
+                                  window.scrollTo({ top: 300, behavior: 'smooth' });
+                                }}
+                                className="text-[10px] bg-zinc-900 border border-zinc-800 text-yellow-400 px-3 py-1.5 rounded-lg hover:bg-zinc-800 transition-colors uppercase font-mono font-bold cursor-pointer"
+                              >
+                                Ver Ficha
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                  
+                  {alumnos.filter(a => a.instituteId === selectedInstituteId).length === 0 && (
+                    <div className="text-center py-10 text-zinc-500 text-xs">No hay postulantes registrados en el campus.</div>
+                  )}
+                </motion.div>
+              )}
+
+              {/* TAB 4: PROFESORES DIRECTORY */}
+              {activeCampusTab === 'Profesores' && (
+                <motion.div
+                  key="tab-profesores-panel"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  className="space-y-4"
+                >
+                  <div className="bg-[#0b0b0c] border border-zinc-900 p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div>
+                      <h3 className="font-display font-black text-lg text-white uppercase tracking-widest flex items-center gap-2">
+                        <Award className="w-5 h-5 text-yellow-400" />
+                        DIRECTORIO DE DOCENTES DEL INSTITUTO
+                      </h3>
+                      <p className="text-xs text-zinc-400 mt-1">
+                        Vota de manera constructiva por los profesores universitarios de tu carrera profesional.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {[
+                      { id: 'prof-1', name: 'Dr. Alberto Valdivia Santillán', course: 'Didáctica General y Pedagogía', approval: 96, gender: 'male' },
+                      { id: 'prof-2', name: 'Mag. Carmen Montenegro Ruiz', course: 'Psicología y Teorías del Aprendizaje', approval: 98, gender: 'female' },
+                      { id: 'prof-3', name: 'Lic. Eulogio Daza Simon', course: 'Práctica Pre-profesional e Investigación', approval: 89, gender: 'male' },
+                      { id: 'prof-4', name: 'Ing. Ronald Alva Castro', course: 'Tecnologías Aplicadas a la Educación', approval: 93, gender: 'male' }
+                    ].map((prof) => {
+                      const storedVotes = professorVotes[prof.id] || (prof.approval + 45);
+                      return (
+                        <div
+                          key={prof.id}
+                          className="bg-[#0b0b0c] border border-zinc-900 p-5 rounded-xl flex flex-col justify-between hover:border-zinc-800 transition-colors"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center gap-3">
+                              {/* Avatar fallback for teacher */}
+                              <div className="w-10 h-10 rounded-full bg-[#121214] border border-zinc-800 flex items-center justify-center text-xs text-yellow-400 font-mono font-black shrink-0">
+                                {prof.gender === 'male' ? '👨‍🏫' : '👩‍🏫'}
+                              </div>
+                              <div>
+                                <h4 className="font-sans font-bold text-white text-sm uppercase">{prof.name}</h4>
+                                <span className="text-[10px] text-zinc-500 font-mono uppercase">{prof.course}</span>
+                              </div>
+                            </div>
+                            <span className="text-xs font-mono font-black text-yellow-400 bg-yellow-400/5 px-2.5 py-1 rounded border border-yellow-400/10 shrink-0">
+                              ★ {calcAverageScore(storedVotes)} 
+                            </span>
+                          </div>
+
+                          <div className="mt-4 pt-4 border-t border-zinc-900 flex justify-between items-center text-xs font-mono">
+                            <div className="text-zinc-400">
+                              Aprobación: <strong className="text-emerald-400">{getApprovalPercent(storedVotes)}%</strong> • <span className="text-zinc-350 font-bold">{storedVotes} pt</span>
+                            </div>
+                            
+                            <button
+                              onClick={() => {
+                                setProfessorVotes(prev => ({
+                                  ...prev,
+                                  [prof.id]: (prev[prof.id] || (prof.approval + 45)) + 1
+                                }));
+                                // add notification log
+                                setSocialLogs(l => [`🗳️ Votaste por el profesor ${prof.name.split(' ')[1]} en Uchiza!`, ...l.slice(0,4)]);
+                              }}
+                              className="px-3 py-1.5 rounded bg-zinc-900 border border-zinc-800 hover:border-yellow-400/30 text-yellow-400 text-[10px] hover:bg-zinc-850 uppercase font-bold transition-all cursor-pointer shadow"
+                            >
+                              Dar punto 👍
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </motion.div>
+              )}
+
+              {/* TAB 5: VERSUS DE PROFESORES */}
+              {activeCampusTab === 'Versus' && (
+                <motion.div
+                  key="tab-versus-panel"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl p-5 sm:p-8 space-y-6"
+                >
+                  <div className="text-center space-y-2 max-w-lg mx-auto">
+                    <span className="text-[10px] font-mono font-black text-yellow-400 bg-yellow-400/10 px-3 py-1 rounded-full uppercase tracking-wider">
+                      ★ COMBATE DE DOCENTES WIKISTARS ★
+                    </span>
+                    <h3 className="font-display font-black text-white text-base sm:text-xl uppercase tracking-tight">
+                      ¿QUIÉN ES EL DOCENTE MÁS POPULAR Y CARISMÁTICO?
+                    </h3>
+                    <p className="text-xs text-zinc-400 font-sans leading-relaxed">
+                      Elige a tu mentor preferido de la Facultad Pedagógica. Los resultados cambian dinámicamente según la votación activa de los alumnos. El respeto mutuo siempre prevalece.
+                    </p>
+                  </div>
+
+                  {/* Competing columns */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 relative">
+                    {/* Centered VS label badge */}
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-yellow-400 text-black border-4 border-[#050505] font-mono font-black flex items-center justify-center text-xs shadow-2xl z-20 hidden md:flex uppercase">
+                      VS
+                    </div>
+
+                    {[
+                      { key: 'Alberto', name: 'Dr. Alberto Valdivia Santillán', course: 'Pedagogía y Filosofía', gender: 'male', desc: 'Conocido por su alta puntualidad, profundidad teórica y gran trayectoria.' },
+                      { key: 'Carmen', name: 'Mag. Carmen Montenegro Ruiz', course: 'Psicología Infantil', gender: 'female', desc: 'Inspiradora, didáctica, utiliza dinámicas modernas de aprendizaje activo.' }
+                    ].map((competeProf) => {
+                      const totalAlberto = professorVotes['Alberto'] || 148;
+                      const totalCarmen = professorVotes['Carmen'] || 165;
+                      const isVoted = votedVersus !== null;
+                      
+                      let pct = 50;
+                      if (competeProf.key === 'Alberto') {
+                        pct = Math.round((totalAlberto / (totalAlberto + totalCarmen)) * 100);
+                      } else {
+                        pct = Math.round((totalCarmen / (totalAlberto + totalCarmen)) * 100);
+                      }
+
+                      return (
+                        <div
+                          key={competeProf.key}
+                          className={`bg-[#121214]/30 border rounded-2xl p-6 flex flex-col justify-between text-center transition-all ${
+                            votedVersus === competeProf.key 
+                              ? 'border-yellow-400 bg-yellow-400/[0.02]' 
+                              : 'border-zinc-900/80 hover:border-zinc-800'
+                          }`}
+                        >
+                          <div className="space-y-4">
+                            <div className="w-14 h-14 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-2xl mx-auto">
+                              {competeProf.gender === 'male' ? '👨‍🏫' : '👩‍🏫'}
+                            </div>
+                            <div>
+                              <h4 className="font-sans font-extrabold text-sm text-white uppercase">{competeProf.name}</h4>
+                              <p className="text-[10px] text-zinc-500 font-mono font-black uppercase mt-0.5">{competeProf.course}</p>
+                            </div>
+                            <p className="text-xs text-zinc-400 font-medium italic">"{competeProf.desc}"</p>
+                          </div>
+
+                          <div className="mt-8 space-y-3">
+                            {/* Vote status button */}
+                            <button
+                              disabled={isVoted}
+                              onClick={() => {
+                                setVotedVersus(competeProf.key);
+                                setProfessorVotes(prev => ({
+                                  ...prev,
+                                  [competeProf.key]: (prev[competeProf.key] || 100) + 1
+                                }));
+                                setSocialLogs(l => [`🗳️ ¡Voto registrado en el versus académico!`, ...l.slice(0,4)]);
+                              }}
+                              className={`w-full py-2.5 rounded-xl font-mono text-xs font-black uppercase transition-all duration-300 shadow cursor-pointer ${
+                                votedVersus === competeProf.key
+                                  ? 'bg-yellow-400 text-black'
+                                  : isVoted 
+                                    ? 'bg-zinc-900 border border-zinc-800 text-zinc-500'
+                                    : 'bg-zinc-900 hover:bg-zinc-850 hover:border-yellow-400/20 text-yellow-400 border border-zinc-800'
+                              }`}
+                            >
+                              {votedVersus === competeProf.key ? '¡TU ELECCIÓN! ✓' : isVoted ? 'Opciones cerradas' : 'Apoyar Docente 👍'}
+                            </button>
+
+                            {/* Percentage progress bar */}
+                            {isVoted && (
+                              <div className="space-y-1.5 pt-2">
+                                <div className="flex justify-between text-[11px] font-mono font-bold text-zinc-400">
+                                  <span>Preferencia</span>
+                                  <span>{pct}%</span>
+                                </div>
+                                <div className="h-2 w-full bg-zinc-900 rounded-full overflow-hidden border border-[#18181b]">
+                                  <div 
+                                    className="h-full bg-yellow-400 rounded-full transition-all duration-1000" 
+                                    style={{ width: `${pct}%` }} 
+                                  />
+                                </div>
+                                <span className="text-[9px] font-mono text-zinc-500 font-medium">
+                                  Total: {competeProf.key === 'Alberto' ? totalAlberto : totalCarmen} alumnos
+                                </span>
+                              </div>
+                            )}
+
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </motion.div>
+              )}
+
+              {/* TAB 6: RACHAS DAILY ENGAGEMENT */}
+              {activeCampusTab === 'Rachas' && (
+                <motion.div
+                  key="tab-rachas-panel"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl p-5 sm:p-8 space-y-6"
+                >
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-4 border-b border-zinc-850 pb-5">
+                    <div className="space-y-1 text-center sm:text-left">
+                      <h3 className="font-display font-black text-lg text-white uppercase tracking-widest flex items-center justify-center sm:justify-start gap-2">
+                        <Flame className="w-5 h-5 text-amber-500 fill-amber-500 animate-pulse" />
+                        TABLERO DE ESTADÍSTICAS Y RACHAS DIARIAS
+                      </h3>
+                      <p className="text-xs text-zinc-400 font-sans">
+                        Reclama tus puntos diarios de WikiStars y compite por mantener viva tu racha en Uchiza.
+                      </p>
+                    </div>
+
+                    <div className="bg-amber-500/10 border border-amber-500/20 px-3.5 py-2 rounded-xl text-center self-stretch sm:self-auto shrink-0">
+                      <span className="block text-[8px] font-mono text-amber-500 uppercase font-black">Mi Racha de Ficha</span>
+                      <span className="text-base font-black text-white font-mono flex items-center justify-center gap-0.5">
+                        🔥 {userStreakCount} DÍAS
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
+                    <div className="space-y-4 md:col-span-2">
+                      <h4 className="font-sans font-bold text-xs text-zinc-200 uppercase tracking-wider">¿Por qué es importante una racha?</h4>
+                      <p className="text-xs sm:text-sm text-zinc-400 leading-relaxed font-sans font-medium">
+                        WikiStars5 promueve la participation activa de los alumnos. Aquellos compañeros que visiten la applet de manera cotidiana, voten, comenten constructivamente o sugieran nuevas estrellas de Uchiza obtienen rachas y recompensas que elevan el prestigio de su instituto.
                       </p>
 
-                      {/* Interactive metrics block */}
-                      <div className="mt-5 pt-3.5 border-t border-zinc-900/60 grid grid-cols-3 gap-1.5 text-center text-[10px] font-mono text-zinc-500">
-                        <div className="bg-zinc-900/30 border border-zinc-900/50 p-2 rounded-xl">
-                          <span className="block text-[8px] text-zinc-500 font-bold uppercase tracking-wide">Popu</span>
-                          <span className="text-white font-black text-xs">★ {al.starsPopularity}</span>
-                        </div>
-                        <div className="bg-zinc-900/30 border border-zinc-900/50 p-2 rounded-xl">
-                          <span className="block text-[8px] text-zinc-500 font-bold uppercase tracking-wide">Caris</span>
-                          <span className="text-white font-black text-xs">★ {al.starsCharisma}</span>
-                        </div>
-                        <div className="bg-zinc-900/30 border border-zinc-900/50 p-2 rounded-xl">
-                          <span className="block text-[8px] text-zinc-500 font-bold uppercase tracking-wide">Talen</span>
-                          <span className="text-white font-black text-xs">★ {al.starsTalent}</span>
-                        </div>
-                      </div>
-
-                      {/* Action buttons */}
-                      <div className="mt-4 pt-1.5 flex gap-2">
-                        {/* Vote up button */}
+                      <div className="bg-[#121214]/60 border border-zinc-900 p-5 rounded-xl text-center space-y-3">
+                        <p className="text-xs text-zinc-350 font-sans font-semibold">
+                          {streakClaimed 
+                            ? '🎉 ¡Excelente! Has sumado tu voto de racha diaria hoy. Regresa mañana.'
+                            : '⚡ ¿Listo para hoy? Presiona el botón para agregar 1 día de presencia y registrar tu actividad.'}
+                        </p>
                         <button
-                          onClick={() => handleUpvote(al.id)}
-                          className="flex-1 bg-yellow-400 hover:bg-yellow-300 text-black text-xs font-mono font-black py-2.5 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-md shadow-yellow-400/10 hover:-translate-y-0.5 active:translate-y-0"
-                        >
-                          <Flame className="w-3.5 h-3.5 text-amber-600 fill-current" />
-                          <span>VOTAR</span>
-                        </button>
-
-                        {/* View Wiki details button */}
-                        <button
+                          disabled={streakClaimed}
                           onClick={() => {
-                            setSelectedAlumnoId(al.id);
-                            window.scrollTo({ top: 300, behavior: 'smooth' });
+                            setStreakClaimed(true);
+                            setUserStreakCount(c => c + 1);
+                            // add social log
+                            setSocialLogs(l => [`⚡ ¡Reclamaste tu racha diaria de la Wiki y sumaste puntos!`, ...l.slice(0, 4)]);
                           }}
-                          className="flex-1 bg-zinc-900 hover:bg-zinc-800 text-zinc-100 border border-zinc-800 hover:border-zinc-700 text-xs font-mono font-bold py-2.5 rounded-xl transition-all text-center cursor-pointer hover:-translate-y-0.5 active:translate-y-0"
+                          className={`px-5 py-3 rounded-full font-mono text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                            streakClaimed
+                              ? 'bg-zinc-900 text-zinc-500 border border-zinc-800'
+                              : 'bg-yellow-400 hover:bg-yellow-300 text-black shadow-[0_4px_15px_rgba(250,204,21,0.2)]'
+                          }`}
                         >
-                          WIKI COMPLETA
+                          {streakClaimed ? '✓ RECOMPENSA RECLAMADA' : 'Claim Daily Streak +1 🔥'}
                         </button>
                       </div>
-                    </motion.div>
-                  );
-                })}
-              </div>
-            )}
+                    </div>
+
+                    {/* Streak leaders panel */}
+                    <div className="bg-zinc-950 border border-zinc-900 p-4 rounded-xl space-y-4">
+                      <h4 className="font-mono text-xs font-black text-zinc-400 uppercase tracking-widest text-center border-b border-zinc-900 pb-2">
+                        🔥 LÍDERES DE RACHAS (UCHIZA)
+                      </h4>
+                      <div className="space-y-3">
+                        {[
+                          { name: 'Alicia Aurelia Berrospi', days: 12 },
+                          { name: 'Almendra Jennifer Daza', days: 7 },
+                          { name: 'Mateo Sebastiani', days: 5 },
+                          { name: 'Tú (Estudiante)', days: userStreakCount }
+                        ].map((leader, i) => (
+                          <div key={i} className="flex items-center justify-between text-xs font-mono border-b border-[#121214] pb-2">
+                            <span className="text-zinc-400 truncate max-w-[140px] uppercase font-bold">{leader.name}</span>
+                            <span className="text-yellow-400 font-extrabold">{leader.days} DÍAS 🔥</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+
+            </AnimatePresence>
 
           </motion.div>
         )}
@@ -2348,23 +3054,38 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Floating Action Button (FAB) for creating an educational center/school, shown only on Main Screen & only for users registered with Google */}
-      {!selectedInstituteId && !selectedAlumnoId && currentUser && (
+      {/* Floating Action Button (FAB) for creating an educational center/school, shown only on Main Screen */}
+      {!selectedInstituteId && !selectedAlumnoId && (
         <motion.button
-          initial={{ scale: 0, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          exit={{ scale: 0, opacity: 0 }}
-          whileHover={{ scale: 1.1 }}
+          initial={{ scale: 0, y: 30, opacity: 0 }}
+          animate={{ scale: 1, y: 0, opacity: 1 }}
+          exit={{ scale: 0, y: 30, opacity: 0 }}
+          whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
           onClick={() => {
+            if (!currentUser) {
+              triggerNotice('¡Acceso restringido! Debes iniciar sesión con tu cuenta de Google para registrar un centro educativo.');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+              return;
+            }
             setIsCreateInstituteModalOpen(true);
             setNewInstituteName('');
             setNewInstituteTipo('instituto');
           }}
-          className="fixed bottom-24 right-6 sm:bottom-12 sm:right-12 z-40 bg-yellow-400 hover:bg-yellow-350 text-black p-5 rounded-full shadow-[0_10px_35px_rgba(250,204,21,0.4)] hover:shadow-[0_12px_40px_rgba(250,204,21,0.5)] transition-all duration-200 cursor-pointer border border-yellow-300/40 flex items-center justify-center group"
+          className="fixed bottom-6 right-6 sm:bottom-8 sm:right-8 z-50 bg-gradient-to-r from-yellow-400 to-amber-500 hover:from-yellow-300 hover:to-amber-400 text-black px-5 py-4 rounded-full shadow-[0_12px_40px_rgba(250,204,21,0.35)] hover:shadow-[0_16px_48px_rgba(250,204,21,0.5)] transition-all duration-300 cursor-pointer border border-yellow-300/30 flex items-center gap-2 font-mono font-black text-[11px] uppercase tracking-wider group"
           title="Crear Perfil de Centro Educativo"
         >
-          <Plus className="w-6 h-6 stroke-[3]" />
+          {currentUser ? (
+            <Plus className="w-4 h-4 stroke-[3] group-hover:rotate-90 transition-transform duration-350 shrink-0" />
+          ) : (
+            <Lock className="w-3.5 h-3.5 stroke-[3] text-amber-950 shrink-0 animate-pulse" />
+          )}
+          <span className="max-w-0 overflow-hidden group-hover:max-w-xs transition-all duration-500 ease-in-out whitespace-nowrap block">
+            {currentUser ? 'Crear Perfil de Centro' : 'Iniciar con Google para Registrar'}
+          </span>
+          <span className="block group-hover:hidden font-extrabold text-[11px]">
+            {currentUser ? 'Crear Perfil' : 'Crear Perfil 🔒'}
+          </span>
         </motion.button>
       )}
 
