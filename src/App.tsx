@@ -1809,38 +1809,7 @@ export default function App() {
                   />
                 </div>
 
-                {/* Institute selection */}
-                <div className="space-y-1.5">
-                  <label className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-black block">Tu Institución Educativa</label>
-                  <select
-                    value={joinInstituteId}
-                    onChange={(e) => setJoinInstituteId(e.target.value)}
-                    className="w-full bg-[#0d0d0d] border border-zinc-900 focus:border-yellow-400 text-xs p-3.5 rounded-xl text-zinc-350 text-zinc-300 outline-none transition-colors duration-200 font-mono font-bold"
-                  >
-                    {institutes.map(inst => (
-                      <option key={inst.id} value={inst.id} className="bg-zinc-950 text-white">
-                        {inst.name} ({inst.shortName})
-                      </option>
-                    ))}
-                  </select>
-                </div>
 
-                {/* Category preference */}
-                <div className="space-y-1.5">
-                  <label className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-black block">Tu Mayor Fortaleza (Meta)</label>
-                  <select
-                    value={joinCategory}
-                    onChange={(e) => setJoinCategory(e.target.value)}
-                    className="w-full bg-[#0d0d0d] border border-zinc-900 focus:border-yellow-400 text-xs p-3.5 rounded-xl text-zinc-350 text-zinc-300 outline-none transition-colors duration-200 font-mono font-bold"
-                  >
-                    <option value="Artista" className="bg-zinc-950 text-white">Artista / Músico</option>
-                    <option value="Deportista" className="bg-zinc-950 text-white">Deportista / Atlético</option>
-                    <option value="Académico" className="bg-zinc-950 text-white">Cerebrito / Académico</option>
-                    <option value="Influencer" className="bg-zinc-950 text-white">Creador de Contenido</option>
-                    <option value="Gaming" className="bg-zinc-950 text-white">Jugador eSports</option>
-                    <option value="Líder" className="bg-zinc-950 text-white">Líder / Delegado</option>
-                  </select>
-                </div>
 
                 <button
                   type="submit"
