@@ -1,7 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
-import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check';
 
 // Configuration provided by the user
 const firebaseConfig = {
@@ -14,32 +13,10 @@ const firebaseConfig = {
   measurementId: "G-EW8RPKXVBJ"
 };
 
-// Habilitar el token de depuración para entornos de desarrollo antes de inicializar App Check
-if (typeof window !== 'undefined') {
-  const isDev = import.meta.env?.DEV || process.env.NODE_ENV !== 'production';
-  if (isDev) {
-    // @ts-ignore
-    self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
-  }
-}
-
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 export const auth = getAuth(app);
-
-// Inicializar App Check de forma segura en el navegador
-if (typeof window !== 'undefined') {
-  try {
-    const siteKey = import.meta.env?.VITE_RECAPTCHA_SITE_KEY || '6Ld-9goqAAAAAI3b_N7s9gBjEH-kvZNpQFo';
-    initializeAppCheck(app, {
-      provider: new ReCaptchaEnterpriseProvider(siteKey),
-      isTokenAutoRefreshEnabled: true
-    });
-  } catch (err) {
-    console.warn("App Check initialization failed or skipped:", err);
-  }
-}
 
 // Sign in anonymously for simple demo connectivity, ignoring error if analytics fails
 try {
