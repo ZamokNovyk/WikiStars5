@@ -26,19 +26,19 @@ export default defineConfig(() => {
           scope: '/',
           icons: [
             {
-              src: 'wikistars_app_icon.svg',
+              src: '/wikistars_app_icon.svg',
               sizes: '192x192 512x512',
               type: 'image/svg+xml',
               purpose: 'any maskable'
             },
             {
-              src: 'wikistars_app_icon.jpg',
+              src: '/wikistars_app_icon.jpg',
               sizes: '192x192',
               type: 'image/jpeg',
               purpose: 'any'
             },
             {
-              src: 'wikistars_app_icon.jpg',
+              src: '/wikistars_app_icon.jpg',
               sizes: '512x512',
               type: 'image/jpeg',
               purpose: 'any maskable'
