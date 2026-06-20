@@ -1023,7 +1023,13 @@ export default function App() {
             {!isAppInstalled && (
               <button
                 id="btn-install"
-                onClick={() => setIsInstallModalOpen(true)}
+                onClick={() => {
+                  if (deferredPrompt) {
+                    handlePWAInstall();
+                  } else {
+                    setIsInstallModalOpen(true);
+                  }
+                }}
                 className="hidden sm:flex items-center gap-2 border border-yellow-400/20 hover:border-yellow-400/80 text-yellow-400 text-xs px-4 py-2 rounded-full font-bold font-mono tracking-wider transition-all duration-300 cursor-pointer bg-yellow-400/5 hover:bg-yellow-400/10 hover:-translate-y-0.5 relative"
                 title="Habilitar instalación en tu dispositivo"
               >
@@ -2726,29 +2732,67 @@ export default function App() {
                 </p>
               </div>
 
-              <div className="space-y-3 pt-2">
-                <div className="bg-[#090909] p-3.5 rounded-2xl border border-zinc-900 text-xs flex gap-3">
-                  <span className="text-yellow-400 font-mono font-black">⚡</span>
-                  <div>
-                    <strong className="block text-zinc-200 font-bold">Actualizaciones ultrarrápidas</strong>
-                    <span className="text-[11px] text-zinc-500 font-sans font-medium">Grados y calificaciones se asientan sin demoras.</span>
+              <div className="space-y-4 pt-2">
+                {deferredPrompt ? (
+                  <div className="space-y-4">
+                    <div className="bg-yellow-400/5 p-4 rounded-2xl border border-yellow-400/20 text-xs flex gap-3">
+                      <span className="text-yellow-400 text-base">💫</span>
+                      <div>
+                        <strong className="block text-yellow-400 font-bold">¡Instalación Directa Disponible!</strong>
+                        <span className="text-[11px] text-zinc-400 font-sans font-medium">WikiStars 5 está optimizada como una Aplicación Web Progresiva. Haz clic abajo para instalar de inmediato.</span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={handlePWAInstall}
+                      style={{ contentVisibility: 'auto' }}
+                      className="w-full bg-yellow-400 hover:bg-yellow-300 text-black font-mono font-black text-xs py-3.5 rounded-xl transition-all duration-300 uppercase tracking-widest cursor-pointer shadow-lg shadow-yellow-400/15 hover:-translate-y-0.5 active:translate-y-0"
+                    >
+                      Instalar Ahora (Nativo PWA)
+                    </button>
                   </div>
-                </div>
-                <div className="bg-[#090909] p-3.5 rounded-2xl border border-zinc-900 text-xs flex gap-3">
-                  <span className="text-yellow-400 font-mono font-black">🔔</span>
-                  <div>
-                    <strong className="block text-zinc-200 font-bold">Alertas de Murmullo</strong>
-                    <span className="text-[11px] text-zinc-500 font-sans font-medium">Entérate si alguien te calificó o te dejó un testimonio.</span>
-                  </div>
-                </div>
-              </div>
+                ) : (
+                  <div className="space-y-3.5 text-left">
+                    <div className="text-center pb-1 text-[11px] text-amber-500 font-mono bg-amber-500/5 rounded-xl p-2.5 border border-amber-500/10">
+                      ⚠️ Evento de instalación no detectado (común en el visualizador Sandbox)
+                    </div>
 
-              <button
-                onClick={handlePWAInstall}
-                className="w-full bg-yellow-400 hover:bg-yellow-300 text-black font-mono font-black text-xs py-3.5 rounded-xl transition-all duration-300 uppercase tracking-widest cursor-pointer shadow-lg shadow-yellow-400/15 hover:-translate-y-0.5 active:translate-y-0"
-              >
-                Instalar Ahora (PWA)
-              </button>
+                    <div className="space-y-2.5">
+                      <div className="bg-[#09090b] p-3 rounded-xl border border-zinc-900 text-xs">
+                        <span className="text-yellow-400 font-bold mr-2">1.</span>
+                        <strong className="text-zinc-200">En el Entorno de Desarrollo:</strong>
+                        <p className="text-[11px] text-zinc-500 mt-1">
+                          Abre la app en una <strong className="text-yellow-400/80">pestaña independiente</strong> (haz clic en el botón de la barra superior del editor) en lugar de usar el iframe de vista previa. El navegador bloquea PWA dentro de contenedores inline.
+                        </p>
+                      </div>
+
+                      <div className="bg-[#09090b] p-3 rounded-xl border border-zinc-900 text-xs">
+                        <span className="text-yellow-400 font-bold mr-2">2.</span>
+                        <strong className="text-zinc-200">En Android / Chrome / Edge:</strong>
+                        <p className="text-[11px] text-zinc-500 mt-1">
+                          Haz clic en el icono de instalación <span className="text-yellow-400/90">(⊕)</span> en la barra de direcciones superior, o abre el menú principal <span className="text-zinc-400">(⋮)</span> y selecciona <strong className="text-zinc-300">"Instalar aplicación"</strong>.
+                        </p>
+                      </div>
+
+                      <div className="bg-[#09090b] p-3 rounded-xl border border-zinc-900 text-xs">
+                        <span className="text-yellow-400 font-bold mr-2">3.</span>
+                        <strong className="text-zinc-200">En iOS Safari (iPhone/iPad):</strong>
+                        <p className="text-[11px] text-zinc-500 mt-1">
+                          Pulsa el botón de <strong className="text-zinc-350">Compartir</strong> de Safari en la parte inferior y elige la opción <strong className="text-yellow-400/90">"Añadir a pantalla de inicio"</strong>.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="pt-2">
+                      <button
+                        onClick={() => setIsInstallModalOpen(false)}
+                        className="w-full bg-[#111] hover:bg-zinc-900 text-zinc-300 hover:text-white font-mono font-bold text-2xs py-3 rounded-xl transition-all duration-200 uppercase tracking-widest cursor-pointer border border-zinc-800"
+                      >
+                        Entendido
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </motion.div>
           </div>
         )}
