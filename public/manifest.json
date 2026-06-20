@@ -1,5 +1,5 @@
 {
-  "name": "WikiStars 5",
+  "name": "WikiStars 5 | Popularidad Estudiantil",
   "short_name": "WikiStars5",
   "description": "Foro democrático estudiantil para registrar y reconocer las calificaciones de los profesores.",
   "start_url": "/",
@@ -7,7 +7,14 @@
   "background_color": "#09090b",
   "theme_color": "#facb15",
   "orientation": "portrait-primary",
+  "prefer_related_applications": false,
   "icons": [
+    {
+      "src": "/wikistars_app_icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
     {
       "src": "/wikistars_app_icon.jpg",
       "sizes": "192x192",

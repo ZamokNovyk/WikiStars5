@@ -2,6 +2,7 @@ const CACHE_NAME = 'wikistars-v1';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
+  '/wikistars_app_icon.svg',
   '/wikistars_app_icon.jpg',
   '/manifest.json'
 ];
@@ -9,8 +10,8 @@ const ASSETS_TO_CACHE = [
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS_TO_CACHE).catch(() => {
-        // Fallback for files that might not be generated yet during load
+      return cache.addAll(ASSETS_TO_CACHE).catch((err) => {
+        console.warn('Alineación de cache de assets de inicio:', err);
       });
     })
   );
