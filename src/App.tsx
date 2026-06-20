@@ -110,7 +110,7 @@ export default function App() {
   const [activeCategoryFilter, setActiveCategoryFilter] = useState<string>('Todos');
 
   // Campus-specific Navigation & View Modes
-  const [activeCampusTab, setActiveCampusTab] = useState<'Estudiantes' | 'Wiki' | 'Hermoso' | 'Profesores' | 'Versus' | 'Rachas'>('Estudiantes');
+  const [activeCampusTab, setActiveCampusTab] = useState<'Wiki' | 'Profesores' | 'Versus' | 'Rachas'>('Wiki');
   const [campusViewMode, setCampusViewMode] = useState<'list' | 'grid'>('list'); // Default to list view as shown in the mockup
   const [studentSortOrder, setStudentSortOrder] = useState<'puntos' | 'nombre' | 'estrellas'>('puntos');
   const [showShareToast, setShowShareToast] = useState(false);
@@ -123,6 +123,57 @@ export default function App() {
   const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
   const [isInstallModalOpen, setIsInstallModalOpen] = useState(false);
   const [isNominateModalOpen, setIsNominateModalOpen] = useState(false);
+
+  // PWA installation state & handlers
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isAppInstalled, setIsAppInstalled] = useState(false);
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+
+    const handleAppInstalled = () => {
+      setIsAppInstalled(true);
+      setDeferredPrompt(null);
+      triggerNotice('🎉 ¡Fabuloso! WikiStars 5 se ha instalado con éxito.');
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    if (window.matchMedia('(display-mode: standalone)').matches) {
+      setIsAppInstalled(true);
+    }
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
+
+  const handlePWAInstall = async () => {
+    if (!deferredPrompt) {
+      triggerNotice('El navegador no soporta o ya tiene instalada la app. Intenta añadirla desde el menú del navegador.');
+      setIsInstallModalOpen(false);
+      return;
+    }
+    try {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        triggerNotice('¡Instalación aceptada! Disfruta de WikiStars 5.');
+      } else {
+        triggerNotice('Instalación cancelada.');
+      }
+    } catch (err) {
+      console.error('Error al intentar instalar:', err);
+      triggerNotice('No se pudo abrir la instalación del navegador. Intenta desde el menú del navegador.');
+    }
+    setDeferredPrompt(null);
+    setIsInstallModalOpen(false);
+  };
 
   // Community notification logs
   const [socialLogs, setSocialLogs] = useState<string[]>([
@@ -969,14 +1020,23 @@ export default function App() {
           <div className="flex items-center gap-3">
             
             {/* Install button */}
-            <button
-              id="btn-install"
-              onClick={() => setIsInstallModalOpen(true)}
-              className="hidden sm:flex items-center gap-2 border border-yellow-400/20 hover:border-yellow-400 text-yellow-400 text-xs px-4 py-2 rounded-full font-bold font-mono tracking-wider transition-all duration-300 cursor-pointer bg-yellow-400/5 hover:bg-yellow-400/10 hover:-translate-y-0.5"
-            >
-              <Download className="w-3.5 h-3.5 text-yellow-400" />
-              INSTALAR APP
-            </button>
+            {!isAppInstalled && (
+              <button
+                id="btn-install"
+                onClick={() => setIsInstallModalOpen(true)}
+                className="hidden sm:flex items-center gap-2 border border-yellow-400/20 hover:border-yellow-400/80 text-yellow-400 text-xs px-4 py-2 rounded-full font-bold font-mono tracking-wider transition-all duration-300 cursor-pointer bg-yellow-400/5 hover:bg-yellow-400/10 hover:-translate-y-0.5 relative"
+                title="Habilitar instalación en tu dispositivo"
+              >
+                <Download className="w-3.5 h-3.5 text-yellow-400 animate-pulse" />
+                <span>INSTALAR APP</span>
+                {deferredPrompt && (
+                  <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-yellow-400 rounded-full animate-ping" />
+                )}
+                {deferredPrompt && (
+                  <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-yellow-400 rounded-full" />
+                )}
+              </button>
+            )}
 
             {/* Registration state */}
             {currentUser ? (
@@ -1328,7 +1388,7 @@ export default function App() {
                 setSelectedInstituteId(null);
                 setActiveCategoryFilter('Todos');
                 setStudentSearch('');
-                setActiveCampusTab('Estudiantes');
+                setActiveCampusTab('Wiki');
               }}
               className="group flex items-center gap-2 text-xs text-zinc-400 hover:text-yellow-400 font-mono tracking-widest font-black uppercase cursor-pointer pb-2 transition-all"
             >
@@ -1449,11 +1509,11 @@ export default function App() {
                 value={studentSearch}
                 onChange={(e) => {
                   setStudentSearch(e.target.value);
-                  if (activeCampusTab !== 'Estudiantes') {
-                    setActiveCampusTab('Estudiantes');
+                  if (activeCampusTab !== 'Profesores' && activeCampusTab !== 'Wiki') {
+                    setActiveCampusTab('Profesores');
                   }
                 }}
-                placeholder="Buscar estudiante o profesor..."
+                placeholder="Buscar profesor..."
                 className="w-full bg-[#0d0d0f] focus:bg-[#121215] border border-zinc-900 focus:border-yellow-400/40 text-xs sm:text-sm py-3.5 pl-11 pr-4 rounded-xl text-zinc-200 outline-none placeholder-zinc-500/85 transition-colors shadow-2xl font-mono duration-200 focus:ring-1 focus:ring-yellow-400/20"
               />
               {studentSearch && (
@@ -1470,8 +1530,6 @@ export default function App() {
             <div className="bg-[#0b0b0c] border border-zinc-900 border-y py-1.5 overflow-x-auto flex items-center gap-1.5 scrollbar-none rounded-xl px-2">
               {[
                 { id: 'Wiki', label: 'Wiki', icon: <BookOpen className="w-3.5 h-3.5" /> },
-                { id: 'Estudiantes', label: 'Estudiantes', icon: <Users className="w-3.5 h-3.5" /> },
-                { id: 'Hermoso', label: 'Hermoso', icon: <Heart className="w-3.5 h-3.5" /> },
                 { id: 'Profesores', label: 'Profesores', icon: <Shield className="w-3.5 h-3.5" /> },
                 { id: 'Versus', label: 'Versus de profesores', icon: <Swords className="w-3.5 h-3.5" /> },
                 { id: 'Rachas', label: 'Rachas', icon: <Flame className="w-3.5 h-3.5" /> },
@@ -1499,8 +1557,8 @@ export default function App() {
             {/* TARGET CONTENT CONTAINER PANEL */}
             <AnimatePresence mode="wait">
               
-              {/* TAB 1: ESTUDIANTES */}
-              {activeCampusTab === 'Estudiantes' && (
+              {/* TAB 1: ESTUDIANTES (ELIMINADO) */}
+              {false && (
                 <motion.div
                   key="tab-estudiantes-panel"
                   initial={{ opacity: 0, y: 10 }}
@@ -1881,8 +1939,8 @@ export default function App() {
                 </motion.div>
               )}
 
-              {/* TAB 3: HERMOSO (Hall of fame) */}
-              {activeCampusTab === 'Hermoso' && (
+              {/* TAB 3: HERMOSO (Hall of fame) (ELIMINADO) */}
+              {false && (
                 <motion.div
                   key="tab-hermoso-panel"
                   initial={{ opacity: 0, y: 10 }}
@@ -2686,13 +2744,10 @@ export default function App() {
               </div>
 
               <button
-                onClick={() => {
-                  setIsInstallModalOpen(false);
-                  triggerNotice('¡Atajo configurado! WikiStars5 se agregó a tu dispositivo ficticiamente.');
-                }}
+                onClick={handlePWAInstall}
                 className="w-full bg-yellow-400 hover:bg-yellow-300 text-black font-mono font-black text-xs py-3.5 rounded-xl transition-all duration-300 uppercase tracking-widest cursor-pointer shadow-lg shadow-yellow-400/15 hover:-translate-y-0.5 active:translate-y-0"
               >
-                Añadir a Pantalla de Inicio
+                Instalar Ahora (PWA)
               </button>
             </motion.div>
           </div>
@@ -3054,40 +3109,7 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Floating Action Button (FAB) for creating an educational center/school, shown only on Main Screen */}
-      {!selectedInstituteId && !selectedAlumnoId && (
-        <motion.button
-          initial={{ scale: 0, y: 30, opacity: 0 }}
-          animate={{ scale: 1, y: 0, opacity: 1 }}
-          exit={{ scale: 0, y: 30, opacity: 0 }}
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={() => {
-            if (!currentUser) {
-              triggerNotice('¡Acceso restringido! Debes iniciar sesión con tu cuenta de Google para registrar un centro educativo.');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-              return;
-            }
-            setIsCreateInstituteModalOpen(true);
-            setNewInstituteName('');
-            setNewInstituteTipo('instituto');
-          }}
-          className="fixed bottom-6 right-6 sm:bottom-8 sm:right-8 z-50 bg-gradient-to-r from-yellow-400 to-amber-500 hover:from-yellow-300 hover:to-amber-400 text-black px-5 py-4 rounded-full shadow-[0_12px_40px_rgba(250,204,21,0.35)] hover:shadow-[0_16px_48px_rgba(250,204,21,0.5)] transition-all duration-300 cursor-pointer border border-yellow-300/30 flex items-center gap-2 font-mono font-black text-[11px] uppercase tracking-wider group"
-          title="Crear Perfil de Centro Educativo"
-        >
-          {currentUser ? (
-            <Plus className="w-4 h-4 stroke-[3] group-hover:rotate-90 transition-transform duration-350 shrink-0" />
-          ) : (
-            <Lock className="w-3.5 h-3.5 stroke-[3] text-amber-950 shrink-0 animate-pulse" />
-          )}
-          <span className="max-w-0 overflow-hidden group-hover:max-w-xs transition-all duration-500 ease-in-out whitespace-nowrap block">
-            {currentUser ? 'Crear Perfil de Centro' : 'Iniciar con Google para Registrar'}
-          </span>
-          <span className="block group-hover:hidden font-extrabold text-[11px]">
-            {currentUser ? 'Crear Perfil' : 'Crear Perfil 🔒'}
-          </span>
-        </motion.button>
-      )}
+      {/* Floating Action Button (FAB) removed */}
 
     </div>
   );
