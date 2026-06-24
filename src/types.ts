@@ -8,6 +8,8 @@ export interface Institute {
   studentCount: number;
   popularCategory: string;
   ratingAverage: number;
+  searchTokens?: string[];
+  searchKeywords?: string[];
 }
 
 export interface Alumno {
@@ -28,6 +30,8 @@ export interface Alumno {
   instagram?: string;
   tiktok?: string;
   nominationReason?: string;
+  searchTokens?: string[];
+  searchKeywords?: string[];
 }
 
 export interface AlumnoComment {

@@ -81,12 +81,36 @@
         }
       },
       "required": ["nombre", "tipo", "creadoPor", "creadoEn", "perfilPhotoUrl", "portadaPhotoUrl", "searchKeywords", "searchTokens"]
+    },
+    "Profesor": {
+      "title": "Profesor",
+      "description": "Un docente perteneciente a un centro educativo específico.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "course": { "type": "string" },
+        "gender": { "type": "string" },
+        "approval": { "type": "number" },
+        "points": { "type": "number" },
+        "instituteId": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name", "course", "gender", "approval", "points", "instituteId"]
     }
   },
   "firestore": {
     "/centros.educativos/{centroId}": {
       "schema": "CentroEducativo",
       "description": "Colección de todos los centros educativos registrados en la plataforma."
+    },
+    "/centros.educativos/{centroId}/profesores/{profesorId}": {
+      "schema": "Profesor",
+      "description": "Subcolección de profesores adscritos a un instituto educativo particular."
+    },
+    "/perfiles/{perfilId}": {
+      "schema": "Profesor",
+      "description": "Colección global de perfiles (actualmente de profesores y en el futuro estudiantes)."
     },
     "/alumnos/{alumnoId}": {
       "schema": "Alumno",

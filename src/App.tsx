@@ -17,7 +17,10 @@ import {
   PlusCircle, 
   Download, 
   X, 
-  Send, 
+  Send,
+  GraduationCap,
+  Building,
+  Landmark, 
   Star, 
   Crown, 
   Gamepad2, 
@@ -40,7 +43,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Institute, Alumno, AlumnoComment } from './types';
 import { INITIAL_INSTITUTES, INITIAL_ALUMNOS, INITIAL_COMMENTS } from './data';
 import { db, auth, handleFirestoreError, OperationType } from './firebase';
-import { collection, doc, setDoc, getDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
+import { collection, doc, setDoc, getDoc, onSnapshot, serverTimestamp, increment } from 'firebase/firestore';
 import { GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 
 function generateDocId(rawName: string) {
@@ -48,6 +51,15 @@ function generateDocId(rawName: string) {
     .replace(/\s+/g, '.')
     .replace(/[^a-z0-0.]/g, '');
 }
+
+const getGuestId = () => {
+  let guestId = localStorage.getItem('wikistars_guest_id');
+  if (!guestId) {
+    guestId = 'g_' + Math.random().toString(36).substring(2, 11) + '_' + Date.now();
+    localStorage.setItem('wikistars_guest_id', guestId);
+  }
+  return guestId;
+};
 
 function generateSearchArrays(nombre: string) {
   const normalized = nombre.toLowerCase()
@@ -98,11 +110,24 @@ export default function App() {
   // Navigation and filters
   const [selectedInstituteId, setSelectedInstituteId] = useState<string | null>(null);
   const [selectedAlumnoId, setSelectedAlumnoId] = useState<string | null>(null);
+  const [selectedProfessorId, setSelectedProfessorId] = useState<string | null>(null);
+  const [activeProfSubTab, setActiveProfSubTab] = useState<'Wiki' | 'Reseñas' | 'Crushes' | 'Ship'>('Reseñas');
+  const [profReviews, setProfReviews] = useState<any[]>([]);
+  const [newReviewText, setNewReviewText] = useState('');
+  const [isSubmittingReview, setIsSubmittingReview] = useState(false);
+  const [profCrushes, setProfCrushes] = useState<any[]>([]);
+  const [newCrushText, setNewCrushText] = useState('');
+  const [isSubmittingCrush, setIsSubmittingCrush] = useState(false);
+  const [profShips, setProfShips] = useState<any[]>([]);
+  const [userVotedShipId, setUserVotedShipId] = useState<string | null>(null);
+  const [userVotes, setUserVotes] = useState<Record<string, { yoTeConozco: boolean; fan: boolean }>>({});
+  const [isVotingProf, setIsVotingProf] = useState(false);
   const [globalSearch, setGlobalSearch] = useState<string>('');
   const [studentSearch, setStudentSearch] = useState<string>('');
 
   // Create Institute Modal State
   const [isCreateInstituteModalOpen, setIsCreateInstituteModalOpen] = useState(false);
+  const [createInstituteStep, setCreateInstituteStep] = useState<1 | 2>(1);
   const [newInstituteName, setNewInstituteName] = useState('');
   const [newInstituteTipo, setNewInstituteTipo] = useState('instituto');
   const [isSubmittingInstitute, setIsSubmittingInstitute] = useState(false);
@@ -110,7 +135,7 @@ export default function App() {
   const [activeCategoryFilter, setActiveCategoryFilter] = useState<string>('Todos');
 
   // Campus-specific Navigation & View Modes
-  const [activeCampusTab, setActiveCampusTab] = useState<'Wiki' | 'Profesores' | 'Versus' | 'Rachas'>('Wiki');
+  const [activeCampusTab, setActiveCampusTab] = useState<'Wiki' | 'Profesores' | 'Rachas'>('Wiki');
   const [campusViewMode, setCampusViewMode] = useState<'list' | 'grid'>('list'); // Default to list view as shown in the mockup
   const [studentSortOrder, setStudentSortOrder] = useState<'puntos' | 'nombre' | 'estrellas'>('puntos');
   const [showShareToast, setShowShareToast] = useState(false);
@@ -118,6 +143,15 @@ export default function App() {
   const [votedVersus, setVotedVersus] = useState<string | null>(null);
   const [streakClaimed, setStreakClaimed] = useState(false);
   const [userStreakCount, setUserStreakCount] = useState(2);
+
+  // Real-time Professors & Add Professor States
+  const [professors, setProfessors] = useState<any[]>([]);
+  const [isAddProfessorModalOpen, setIsAddProfessorModalOpen] = useState(false);
+  const [newProfName, setNewProfName] = useState('');
+  const [newProfCourse, setNewProfCourse] = useState('');
+  const [newProfGender, setNewProfGender] = useState<'male' | 'female'>('male');
+  const [newProfApproval, setNewProfApproval] = useState(95);
+  const [isSubmittingProf, setIsSubmittingProf] = useState(false);
 
   // Modals state
   const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
@@ -209,6 +243,7 @@ export default function App() {
         // If the database has no alumnos yet, seed it with initial values!
         try {
           for (const al of INITIAL_ALUMNOS) {
+            const { searchTokens, searchKeywords } = generateSearchArrays(al.name);
             const mappedAlumno = {
               id: al.id,
               name: al.name,
@@ -225,7 +260,9 @@ export default function App() {
               points: al.points,
               isVerified: al.isVerified || false,
               instagram: al.instagram || '',
-              tiktok: al.tiktok || ''
+              tiktok: al.tiktok || '',
+              searchTokens,
+              searchKeywords
             };
             await setDoc(doc(db, 'alumnos', al.id), mappedAlumno);
           }
@@ -328,6 +365,376 @@ export default function App() {
       localStorage.removeItem('wikistars_user');
     }
   }, [currentUser]);
+
+  // Load professors for active institute in real-time
+  useEffect(() => {
+    if (!selectedInstituteId) {
+      setProfessors([]);
+      return;
+    }
+
+    const path = `centros.educativos/${selectedInstituteId}/profesores`;
+    const unsubscribe = onSnapshot(collection(db, path), async (snapshot) => {
+      if (snapshot.empty) {
+        // Seed initial 4 professors for this school
+        const initialProfs = [
+          { name: 'Dr. Alberto Valdivia Santillán', gender: 'male' },
+          { name: 'Mag. Carmen Montenegro Ruiz', gender: 'female' },
+          { name: 'Lic. Eulogio Daza Simon', gender: 'male' },
+          { name: 'Ing. Ronald Alva Castro', gender: 'male' }
+        ];
+        
+        try {
+          for (const prof of initialProfs) {
+            const profId = prof.name
+              .toLowerCase()
+              .normalize('NFD')
+              .replace(/[\u0300-\u036f]/g, '')
+              .replace(/[^a-z0-9\s.-]/g, '')
+              .trim()
+              .replace(/\s+/g, '.');
+
+            const { searchTokens, searchKeywords } = generateSearchArrays(prof.name);
+            const profData = {
+              id: profId,
+              name: prof.name,
+              gender: prof.gender,
+              instituteId: selectedInstituteId,
+              createdAt: new Date().toISOString(),
+              searchTokens,
+              searchKeywords
+            };
+            
+            // Save in institute's subcollection
+            await setDoc(doc(db, `centros.educativos/${selectedInstituteId}/profesores`, profId), profData);
+            
+            // Save in root '/perfiles' collection
+            await setDoc(doc(db, 'perfiles', profId), {
+              ...profData,
+              tipo: 'profesor'
+            });
+          }
+        } catch (err) {
+          console.error("Failed to seed professors:", err);
+        }
+      } else {
+        const list: any[] = [];
+        snapshot.forEach((snapDoc) => {
+          list.push(snapDoc.data());
+        });
+        setProfessors(list);
+      }
+    }, (error) => {
+      console.warn("Could not fetch professors:", error);
+    });
+
+    return () => unsubscribe();
+  }, [selectedInstituteId]);
+
+  // Check user's votes for the selected professor
+  useEffect(() => {
+    if (!selectedProfessorId) return;
+    const userId = auth.currentUser?.uid || getGuestId();
+    
+    const checkUserVotes = async () => {
+      try {
+        const yoRef = doc(db, `perfiles/${selectedProfessorId}/yoTeConozco`, userId);
+        const fanRef = doc(db, `perfiles/${selectedProfessorId}/fan`, userId);
+        
+        const [yoSnap, fanSnap] = await Promise.all([getDoc(yoRef), getDoc(fanRef)]);
+        
+        setUserVotes(prev => ({
+          ...prev,
+          [selectedProfessorId]: {
+            yoTeConozco: yoSnap.exists(),
+            fan: fanSnap.exists()
+          }
+        }));
+      } catch (err) {
+        console.warn("Could not check user votes:", err);
+      }
+    };
+    
+    checkUserVotes();
+  }, [selectedProfessorId, auth.currentUser]);
+
+  // Synchronize Crushes, Ships and Reviews for the selected professor in real-time
+  useEffect(() => {
+    if (!selectedProfessorId) {
+      setProfCrushes([]);
+      setProfShips([]);
+      setProfReviews([]);
+      setUserVotedShipId(null);
+      return;
+    }
+
+    const userId = auth.currentUser?.uid || getGuestId();
+
+    // 1. Sync Crushes
+    const crushesRef = collection(db, `perfiles/${selectedProfessorId}/crushes`);
+    const unsubCrushes = onSnapshot(crushesRef, (snapshot) => {
+      const list: any[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      setProfCrushes(list);
+    });
+
+    // 2. Sync Ships
+    const shipsRef = collection(db, `perfiles/${selectedProfessorId}/ships`);
+    const unsubShips = onSnapshot(shipsRef, async (snapshot) => {
+      if (snapshot.empty) {
+        const initialShips = [
+          { id: 'slide', label: 'Las diapositivas infinitas', votes: 12 },
+          { id: 'coffee', label: 'El café bien cargado de las 8 AM', votes: 19 },
+          { id: 'marker', label: 'El plumón acrílico rojo que nunca pinta', votes: 8 },
+          { id: 'silence', label: 'El silencio incómodo después de una pregunta', votes: 15 }
+        ];
+        try {
+          for (const s of initialShips) {
+            await setDoc(doc(db, `perfiles/${selectedProfessorId}/ships`, s.id), s);
+          }
+        } catch (err) {
+          console.warn("Failed to seed initial ships:", err);
+        }
+      } else {
+        const list: any[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push({ id: docSnap.id, ...docSnap.data() });
+        });
+        list.sort((a, b) => (b.votes || 0) - (a.votes || 0));
+        setProfShips(list);
+      }
+    });
+
+    // 3. Sync Reviews (Reseñas)
+    const reviewsRef = collection(db, `perfiles/${selectedProfessorId}/reviews`);
+    const unsubReviews = onSnapshot(reviewsRef, (snapshot) => {
+      const list: any[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      setProfReviews(list);
+    });
+
+    // 4. Check if user voted for a ship
+    const checkShipVote = async () => {
+      try {
+        const voteRef = doc(db, `perfiles/${selectedProfessorId}/shipsVotedBy`, userId);
+        const voteSnap = await getDoc(voteRef);
+        if (voteSnap.exists()) {
+          setUserVotedShipId(voteSnap.data().shipId || null);
+        } else {
+          setUserVotedShipId(null);
+        }
+      } catch (err) {
+        console.warn("Error checking ship vote:", err);
+      }
+    };
+    checkShipVote();
+
+    return () => {
+      unsubCrushes();
+      unsubShips();
+      unsubReviews();
+    };
+  }, [selectedProfessorId, auth.currentUser]);
+
+  const handleAddProfessor = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedInstituteId || !newProfName.trim()) return;
+
+    setIsSubmittingProf(true);
+    try {
+      const profId = newProfName.trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9\s.-]/g, '')
+        .trim()
+        .replace(/\s+/g, '.');
+
+      const { searchTokens, searchKeywords } = generateSearchArrays(newProfName.trim());
+
+      const profData = {
+        id: profId,
+        name: newProfName.trim(),
+        gender: newProfGender,
+        instituteId: selectedInstituteId,
+        createdAt: new Date().toISOString(),
+        searchTokens,
+        searchKeywords
+      };
+
+      // 1. Save in subcollection: centros.educativos/{institutoId}/profesores/{profId}
+      const subCollPath = `centros.educativos/${selectedInstituteId}/profesores`;
+      await setDoc(doc(db, subCollPath, profId), profData);
+
+      // 2. Save in root general collection: perfiles/{profId}
+      await setDoc(doc(db, 'perfiles', profId), {
+        ...profData,
+        tipo: 'profesor'
+      });
+
+      setNewProfName('');
+      setNewProfCourse('');
+      setNewProfGender('male');
+      setNewProfApproval(95);
+      setIsAddProfessorModalOpen(false);
+      
+      pushSocialLog(`👨‍🏫 Se agregó al profesor ${profData.name.split(' ')[0]} en el campus!`);
+      triggerNotice('¡Profesor agregado exitosamente!');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `centros.educativos/${selectedInstituteId}/profesores`);
+    } finally {
+      setIsSubmittingProf(false);
+    }
+  };
+
+  const handleVoteProfessorType = async (profId: string, type: 'yoTeConozco' | 'fan') => {
+    if (isVotingProf) return;
+    const userId = auth.currentUser?.uid || getGuestId();
+    
+    const currentVotes = userVotes[profId] || { yoTeConozco: false, fan: false };
+    if (currentVotes[type]) {
+      triggerNotice(`¡Ya registraste tu voto de ${type === 'fan' ? 'Fan' : 'Yo te conozco'}!`);
+      return;
+    }
+    
+    setIsVotingProf(true);
+    try {
+      const timestamp = new Date().toISOString();
+      
+      // 1. Save in perfiles/{profId}/{type}/{userId}
+      const perfVoteRef = doc(db, `perfiles/${profId}/${type}`, userId);
+      await setDoc(perfVoteRef, { votedAt: timestamp });
+      
+      // 2. Save in centros.educativos/{instId}/profesores/{profId}/{type}/{userId}
+      if (selectedInstituteId) {
+        const instVoteRef = doc(db, `centros.educativos/${selectedInstituteId}/profesores/${profId}/${type}`, userId);
+        await setDoc(instVoteRef, { votedAt: timestamp });
+      }
+      
+      // 3. Increment counters in both perfiles/{profId} and centros.educativos/{instId}/profesores/{profId}
+      const perfDocRef = doc(db, 'perfiles', profId);
+      const counterField = type === 'yoTeConozco' ? 'yoTeConozcoCount' : 'fanCount';
+      
+      await setDoc(perfDocRef, { [counterField]: increment(1) }, { merge: true });
+      
+      if (selectedInstituteId) {
+        const instDocRef = doc(db, `centros.educativos/${selectedInstituteId}/profesores`, profId);
+        await setDoc(instDocRef, { [counterField]: increment(1) }, { merge: true });
+      }
+      
+      // Update local votes state
+      setUserVotes(prev => ({
+        ...prev,
+        [profId]: {
+          ...prev[profId],
+          [type]: true
+        }
+      }));
+      
+      pushSocialLog(type === 'fan' 
+        ? `❤️ ¡Eres Fan de un docente del campus!` 
+        : `👥 ¡Confirmaste que conoces a un docente!`
+      );
+      triggerNotice('¡Voto registrado exitosamente!');
+    } catch (error) {
+      console.error("Error voting:", error);
+      triggerNotice('Hubo un error al registrar tu voto.');
+    } finally {
+      setIsVotingProf(false);
+    }
+  };
+
+  const handleSubmitCrush = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProfessorId || !newCrushText.trim() || isSubmittingCrush) return;
+    setIsSubmittingCrush(true);
+    try {
+      const crushId = 'c_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
+      const text = newCrushText.trim();
+      const timestamp = new Date().toISOString();
+      const authorName = currentUser ? currentUser.name : 'Estudiante Anónimo';
+      const authorId = auth.currentUser?.uid || getGuestId();
+
+      await setDoc(doc(db, `perfiles/${selectedProfessorId}/crushes`, crushId), {
+        text,
+        authorName,
+        authorId,
+        createdAt: timestamp
+      });
+
+      setNewCrushText('');
+      pushSocialLog(`❤️ ¡Se publicó un Crush anónimo para un docente!`);
+      triggerNotice('¡Crush publicado de forma anónima!');
+    } catch (err) {
+      console.error("Error submitting crush:", err);
+      triggerNotice('No se pudo enviar el crush.');
+    } finally {
+      setIsSubmittingCrush(false);
+    }
+  };
+
+  const handleSubmitReview = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProfessorId || !newReviewText.trim() || isSubmittingReview) return;
+    setIsSubmittingReview(true);
+    try {
+      const reviewId = 'r_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
+      const text = newReviewText.trim();
+      const timestamp = new Date().toISOString();
+      const authorName = currentUser ? currentUser.name : 'Estudiante Anónimo';
+      const authorId = auth.currentUser?.uid || getGuestId();
+
+      await setDoc(doc(db, `perfiles/${selectedProfessorId}/reviews`, reviewId), {
+        text,
+        authorName,
+        authorId,
+        createdAt: timestamp
+      });
+
+      setNewReviewText('');
+      pushSocialLog(`📝 ¡Se publicó una nueva reseña para un docente!`);
+      triggerNotice('¡Reseña publicada con éxito!');
+    } catch (err) {
+      console.error("Error submitting review:", err);
+      triggerNotice('No se pudo enviar la reseña.');
+    } finally {
+      setIsSubmittingReview(false);
+    }
+  };
+
+  const handleVoteShip = async (shipId: string) => {
+    if (!selectedProfessorId) return;
+    const userId = auth.currentUser?.uid || getGuestId();
+
+    if (userVotedShipId) {
+      triggerNotice('¡Ya votaste por tu ship favorito para este docente!');
+      return;
+    }
+
+    try {
+      await setDoc(doc(db, `perfiles/${selectedProfessorId}/shipsVotedBy`, userId), {
+        shipId,
+        votedAt: new Date().toISOString()
+      });
+
+      await setDoc(doc(db, `perfiles/${selectedProfessorId}/ships`, shipId), {
+        votes: increment(1)
+      }, { merge: true });
+
+      setUserVotedShipId(shipId);
+      pushSocialLog(`💖 ¡Se registró un voto de emparejamiento (Ship)!`);
+      triggerNotice('¡Voto de ship registrado!');
+    } catch (err) {
+      console.error("Error voting for ship:", err);
+      triggerNotice('No se pudo guardar tu voto de ship.');
+    }
+  };
 
   // Synchronize Google Auth state and update /users in Firestore
   useEffect(() => {
@@ -542,6 +949,7 @@ export default function App() {
     }
 
     const newId = `star-${Date.now()}`;
+    const { searchTokens, searchKeywords } = generateSearchArrays(nominateName);
     const newAlumno: Alumno = {
       id: newId,
       name: nominateName,
@@ -559,7 +967,9 @@ export default function App() {
       isVerified: false,
       instagram: '',
       tiktok: '',
-      nominationReason: nominateReason || ''
+      nominationReason: nominateReason || '',
+      searchTokens,
+      searchKeywords
     };
 
     try {
@@ -798,9 +1208,13 @@ export default function App() {
 
       let matchedWordsCount = 0;
       queryWords.forEach(word => {
-        if (combined.includes(word)) {
+        const tokens = al.searchTokens || generateSearchArrays(al.name).searchTokens;
+        const keywords = al.searchKeywords || generateSearchArrays(al.name).searchKeywords;
+        const matchesTokenOrKeyword = tokens.some(t => t.startsWith(word) || word.startsWith(t)) || keywords.includes(word);
+
+        if (combined.includes(word) || matchesTokenOrKeyword) {
           matchedWordsCount++;
-          if (nameNorm.includes(word)) {
+          if (nameNorm.includes(word) || matchesTokenOrKeyword) {
             score += 30;
           }
           if (nicknameNorm.includes(word)) {
@@ -810,9 +1224,9 @@ export default function App() {
         }
       });
 
-      const isMatch = matchedWordsCount > 0;
-      if (matchedWordsCount === queryWords.length) {
-        score += 50;
+      const isMatch = matchedWordsCount === queryWords.length;
+      if (isMatch) {
+        score += 100; // heavy boost for fully matching all query words (order-independent)
       }
 
       return { al, score, isMatch };
@@ -858,9 +1272,13 @@ export default function App() {
 
           let matchedWordsCount = 0;
           queryWords.forEach(word => {
-            if (combined.includes(word)) {
+            const tokens = al.searchTokens || generateSearchArrays(al.name).searchTokens;
+            const keywords = al.searchKeywords || generateSearchArrays(al.name).searchKeywords;
+            const matchesTokenOrKeyword = tokens.some(t => t.startsWith(word) || word.startsWith(t)) || keywords.includes(word);
+
+            if (combined.includes(word) || matchesTokenOrKeyword) {
               matchedWordsCount++;
-              if (nameNorm.includes(word)) {
+              if (nameNorm.includes(word) || matchesTokenOrKeyword) {
                 score += 30;
               }
               if (nicknameNorm.includes(word)) {
@@ -873,9 +1291,9 @@ export default function App() {
           // Sort base points are added as tie breaker
           score += (al.points / 1000);
 
-          const isMatch = matchedWordsCount > 0;
-          if (matchedWordsCount === queryWords.length) {
-            score += 50;
+          const isMatch = matchedWordsCount === queryWords.length;
+          if (isMatch) {
+            score += 100;
           }
 
           return { al, score, isMatch };
@@ -905,6 +1323,37 @@ export default function App() {
     return sortedPool;
   }, [selectedInstituteId, activeCategoryFilter, studentSearch, alumnos, studentSortOrder]);
 
+  const filteredProfessorsInCampus = useMemo(() => {
+    if (!selectedInstituteId) return [];
+    if (!studentSearch.trim()) return professors;
+
+    const queryNormalized = normalizeText(studentSearch);
+    const queryWords = queryNormalized.split(/\s+/).filter(w => w.length > 0);
+    if (queryWords.length === 0) return professors;
+
+    const scored = professors.map(prof => {
+      const nameNorm = normalizeText(prof.name);
+      
+      let matchedWordsCount = 0;
+      queryWords.forEach(word => {
+        const tokens = prof.searchTokens || generateSearchArrays(prof.name).searchTokens;
+        const keywords = prof.searchKeywords || generateSearchArrays(prof.name).searchKeywords;
+        const matchesTokenOrKeyword = tokens.some((t: string) => t.startsWith(word) || word.startsWith(t)) || keywords.includes(word);
+
+        if (nameNorm.includes(word) || matchesTokenOrKeyword) {
+          matchedWordsCount++;
+        }
+      });
+
+      const isMatch = matchedWordsCount === queryWords.length;
+      return { prof, isMatch };
+    });
+
+    return scored
+      .filter(item => item.isMatch)
+      .map(item => item.prof);
+  }, [selectedInstituteId, studentSearch, professors]);
+
   // Top National popular students ranking
   const topNationalAlumnos = useMemo(() => {
     return [...alumnos].sort((a, b) => b.points - a.points).slice(0, 3);
@@ -918,6 +1367,10 @@ export default function App() {
   const currentSelectedAlumno = useMemo(() => {
     return alumnos.find(a => a.id === selectedAlumnoId) || null;
   }, [selectedAlumnoId, alumnos]);
+
+  const currentSelectedProfessor = useMemo(() => {
+    return professors.find(p => p.id === selectedProfessorId) || null;
+  }, [selectedProfessorId, professors]);
 
   const currentAlumnoComments = useMemo(() => {
     if (!selectedAlumnoId) return [];
@@ -1384,7 +1837,7 @@ export default function App() {
         )}
 
         {/* VIEW 2: ACTIVE INSTITUTE CAMPUS HUB WORKSPACE */}
-        {selectedInstituteId && currentSelectedInstitute && !selectedAlumnoId && (
+        {selectedInstituteId && currentSelectedInstitute && !selectedAlumnoId && !selectedProfessorId && (
           <motion.div 
             id="campus-hub-view"
             initial={{ opacity: 0 }}
@@ -1394,6 +1847,7 @@ export default function App() {
               id="btn-back-global"
               onClick={() => {
                 setSelectedInstituteId(null);
+                setSelectedProfessorId(null);
                 setActiveCategoryFilter('Todos');
                 setStudentSearch('');
                 setActiveCampusTab('Wiki');
@@ -1539,7 +1993,6 @@ export default function App() {
               {[
                 { id: 'Wiki', label: 'Wiki', icon: <BookOpen className="w-3.5 h-3.5" /> },
                 { id: 'Profesores', label: 'Profesores', icon: <Shield className="w-3.5 h-3.5" /> },
-                { id: 'Versus', label: 'Versus de profesores', icon: <Swords className="w-3.5 h-3.5" /> },
                 { id: 'Rachas', label: 'Rachas', icon: <Flame className="w-3.5 h-3.5" /> },
               ].map(tab => {
                 const isActive = activeCampusTab === tab.id;
@@ -2051,173 +2504,62 @@ export default function App() {
                         Vota de manera constructiva por los profesores universitarios de tu carrera profesional.
                       </p>
                     </div>
+
+                    <button
+                      onClick={() => setIsAddProfessorModalOpen(true)}
+                      className="bg-yellow-400 text-black hover:bg-yellow-300 font-black text-[11px] px-4 py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all duration-300 font-mono tracking-wider shadow-[0_4px_12px_rgba(250,204,21,0.15)] hover:shadow-[0_4px_18px_rgba(250,204,21,0.25)] hover:-translate-y-0.5 active:translate-y-0 cursor-pointer uppercase shrink-0"
+                    >
+                      <Plus className="w-4 h-4 text-black" />
+                      AGREGAR PROFESOR 👨‍🏫
+                    </button>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {[
-                      { id: 'prof-1', name: 'Dr. Alberto Valdivia Santillán', course: 'Didáctica General y Pedagogía', approval: 96, gender: 'male' },
-                      { id: 'prof-2', name: 'Mag. Carmen Montenegro Ruiz', course: 'Psicología y Teorías del Aprendizaje', approval: 98, gender: 'female' },
-                      { id: 'prof-3', name: 'Lic. Eulogio Daza Simon', course: 'Práctica Pre-profesional e Investigación', approval: 89, gender: 'male' },
-                      { id: 'prof-4', name: 'Ing. Ronald Alva Castro', course: 'Tecnologías Aplicadas a la Educación', approval: 93, gender: 'male' }
-                    ].map((prof) => {
-                      const storedVotes = professorVotes[prof.id] || (prof.approval + 45);
+                    {filteredProfessorsInCampus.map((prof) => {
+                      const total = (prof.yoTeConozcoCount || 0) + (prof.fanCount || 0);
+                      const ratio = total > 0 ? (prof.fanCount || 0) / total : 0;
+                      const rating = total > 0 ? (3.0 + ratio * 2.0).toFixed(1) : '0.0';
+
                       return (
                         <div
                           key={prof.id}
-                          className="bg-[#0b0b0c] border border-zinc-900 p-5 rounded-xl flex flex-col justify-between hover:border-zinc-800 transition-colors"
+                          onClick={() => setSelectedProfessorId(prof.id)}
+                          className="bg-[#0b0b0c] border border-zinc-900 p-5 rounded-xl hover:border-yellow-400/20 hover:bg-[#121214]/40 transition-all duration-300 cursor-pointer group flex items-center justify-between gap-4"
                         >
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="flex items-center gap-3">
-                              {/* Avatar fallback for teacher */}
-                              <div className="w-10 h-10 rounded-full bg-[#121214] border border-zinc-800 flex items-center justify-center text-xs text-yellow-400 font-mono font-black shrink-0">
-                                {prof.gender === 'male' ? '👨‍🏫' : '👩‍🏫'}
-                              </div>
-                              <div>
-                                <h4 className="font-sans font-bold text-white text-sm uppercase">{prof.name}</h4>
-                                <span className="text-[10px] text-zinc-500 font-mono uppercase">{prof.course}</span>
+                          <div className="flex items-center gap-3 min-w-0">
+                            {/* Avatar fallback for teacher */}
+                            <div className="w-10 h-10 rounded-full bg-[#121214] border border-zinc-800 flex items-center justify-center text-xs text-yellow-400 font-mono font-black shrink-0 transition-all group-hover:border-yellow-400/30">
+                              {prof.gender === 'male' ? '👨‍🏫' : '👩‍🏫'}
+                            </div>
+                            <div className="min-w-0">
+                              <h4 className="font-sans font-bold text-white text-sm uppercase group-hover:text-yellow-400 transition-colors truncate">{prof.name}</h4>
+                              <div className="flex items-center gap-2 mt-0.5 font-mono text-[9px] text-zinc-500 uppercase font-black">
+                                <span className="text-zinc-400">Docente</span>
+                                <span>•</span>
+                                <span className="flex items-center gap-1">👥 {prof.yoTeConozcoCount || 0}</span>
+                                <span>•</span>
+                                <span className="flex items-center gap-1 text-red-400/80">❤️ {prof.fanCount || 0}</span>
                               </div>
                             </div>
-                            <span className="text-xs font-mono font-black text-yellow-400 bg-yellow-400/5 px-2.5 py-1 rounded border border-yellow-400/10 shrink-0">
-                              ★ {calcAverageScore(storedVotes)} 
-                            </span>
                           </div>
 
-                          <div className="mt-4 pt-4 border-t border-zinc-900 flex justify-between items-center text-xs font-mono">
-                            <div className="text-zinc-400">
-                              Aprobación: <strong className="text-emerald-400">{getApprovalPercent(storedVotes)}%</strong> • <span className="text-zinc-350 font-bold">{storedVotes} pt</span>
-                            </div>
-                            
-                            <button
-                              onClick={() => {
-                                setProfessorVotes(prev => ({
-                                  ...prev,
-                                  [prof.id]: (prev[prof.id] || (prof.approval + 45)) + 1
-                                }));
-                                // add notification log
-                                setSocialLogs(l => [`🗳️ Votaste por el profesor ${prof.name.split(' ')[1]} en Uchiza!`, ...l.slice(0,4)]);
-                              }}
-                              className="px-3 py-1.5 rounded bg-zinc-900 border border-zinc-800 hover:border-yellow-400/30 text-yellow-400 text-[10px] hover:bg-zinc-850 uppercase font-bold transition-all cursor-pointer shadow"
-                            >
-                              Dar punto 👍
-                            </button>
+                          {/* Score badge */}
+                          <div className="flex items-center gap-1 bg-yellow-400/5 px-2.5 py-1 rounded border border-yellow-400/10 shrink-0 text-[10px] font-mono font-black text-yellow-400">
+                            <span>★</span>
+                            <span>{rating}</span>
                           </div>
                         </div>
                       );
                     })}
                   </div>
-                </motion.div>
-              )}
+                  
+                  {professors.length === 0 && (
+                    <div className="text-center py-10 text-zinc-500 text-xs font-mono">No hay docentes registrados en este instituto.</div>
+                  )}
 
-              {/* TAB 5: VERSUS DE PROFESORES */}
-              {activeCampusTab === 'Versus' && (
-                <motion.div
-                  key="tab-versus-panel"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                  className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl p-5 sm:p-8 space-y-6"
-                >
-                  <div className="text-center space-y-2 max-w-lg mx-auto">
-                    <span className="text-[10px] font-mono font-black text-yellow-400 bg-yellow-400/10 px-3 py-1 rounded-full uppercase tracking-wider">
-                      ★ COMBATE DE DOCENTES WIKISTARS ★
-                    </span>
-                    <h3 className="font-display font-black text-white text-base sm:text-xl uppercase tracking-tight">
-                      ¿QUIÉN ES EL DOCENTE MÁS POPULAR Y CARISMÁTICO?
-                    </h3>
-                    <p className="text-xs text-zinc-400 font-sans leading-relaxed">
-                      Elige a tu mentor preferido de la Facultad Pedagógica. Los resultados cambian dinámicamente según la votación activa de los alumnos. El respeto mutuo siempre prevalece.
-                    </p>
-                  </div>
-
-                  {/* Competing columns */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 relative">
-                    {/* Centered VS label badge */}
-                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-yellow-400 text-black border-4 border-[#050505] font-mono font-black flex items-center justify-center text-xs shadow-2xl z-20 hidden md:flex uppercase">
-                      VS
-                    </div>
-
-                    {[
-                      { key: 'Alberto', name: 'Dr. Alberto Valdivia Santillán', course: 'Pedagogía y Filosofía', gender: 'male', desc: 'Conocido por su alta puntualidad, profundidad teórica y gran trayectoria.' },
-                      { key: 'Carmen', name: 'Mag. Carmen Montenegro Ruiz', course: 'Psicología Infantil', gender: 'female', desc: 'Inspiradora, didáctica, utiliza dinámicas modernas de aprendizaje activo.' }
-                    ].map((competeProf) => {
-                      const totalAlberto = professorVotes['Alberto'] || 148;
-                      const totalCarmen = professorVotes['Carmen'] || 165;
-                      const isVoted = votedVersus !== null;
-                      
-                      let pct = 50;
-                      if (competeProf.key === 'Alberto') {
-                        pct = Math.round((totalAlberto / (totalAlberto + totalCarmen)) * 100);
-                      } else {
-                        pct = Math.round((totalCarmen / (totalAlberto + totalCarmen)) * 100);
-                      }
-
-                      return (
-                        <div
-                          key={competeProf.key}
-                          className={`bg-[#121214]/30 border rounded-2xl p-6 flex flex-col justify-between text-center transition-all ${
-                            votedVersus === competeProf.key 
-                              ? 'border-yellow-400 bg-yellow-400/[0.02]' 
-                              : 'border-zinc-900/80 hover:border-zinc-800'
-                          }`}
-                        >
-                          <div className="space-y-4">
-                            <div className="w-14 h-14 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-2xl mx-auto">
-                              {competeProf.gender === 'male' ? '👨‍🏫' : '👩‍🏫'}
-                            </div>
-                            <div>
-                              <h4 className="font-sans font-extrabold text-sm text-white uppercase">{competeProf.name}</h4>
-                              <p className="text-[10px] text-zinc-500 font-mono font-black uppercase mt-0.5">{competeProf.course}</p>
-                            </div>
-                            <p className="text-xs text-zinc-400 font-medium italic">"{competeProf.desc}"</p>
-                          </div>
-
-                          <div className="mt-8 space-y-3">
-                            {/* Vote status button */}
-                            <button
-                              disabled={isVoted}
-                              onClick={() => {
-                                setVotedVersus(competeProf.key);
-                                setProfessorVotes(prev => ({
-                                  ...prev,
-                                  [competeProf.key]: (prev[competeProf.key] || 100) + 1
-                                }));
-                                setSocialLogs(l => [`🗳️ ¡Voto registrado en el versus académico!`, ...l.slice(0,4)]);
-                              }}
-                              className={`w-full py-2.5 rounded-xl font-mono text-xs font-black uppercase transition-all duration-300 shadow cursor-pointer ${
-                                votedVersus === competeProf.key
-                                  ? 'bg-yellow-400 text-black'
-                                  : isVoted 
-                                    ? 'bg-zinc-900 border border-zinc-800 text-zinc-500'
-                                    : 'bg-zinc-900 hover:bg-zinc-850 hover:border-yellow-400/20 text-yellow-400 border border-zinc-800'
-                              }`}
-                            >
-                              {votedVersus === competeProf.key ? '¡TU ELECCIÓN! ✓' : isVoted ? 'Opciones cerradas' : 'Apoyar Docente 👍'}
-                            </button>
-
-                            {/* Percentage progress bar */}
-                            {isVoted && (
-                              <div className="space-y-1.5 pt-2">
-                                <div className="flex justify-between text-[11px] font-mono font-bold text-zinc-400">
-                                  <span>Preferencia</span>
-                                  <span>{pct}%</span>
-                                </div>
-                                <div className="h-2 w-full bg-zinc-900 rounded-full overflow-hidden border border-[#18181b]">
-                                  <div 
-                                    className="h-full bg-yellow-400 rounded-full transition-all duration-1000" 
-                                    style={{ width: `${pct}%` }} 
-                                  />
-                                </div>
-                                <span className="text-[9px] font-mono text-zinc-500 font-medium">
-                                  Total: {competeProf.key === 'Alberto' ? totalAlberto : totalCarmen} alumnos
-                                </span>
-                              </div>
-                            )}
-
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                  {professors.length > 0 && filteredProfessorsInCampus.length === 0 && (
+                    <div className="text-center py-10 text-zinc-500 text-xs font-mono">No se encontraron docentes con esos términos de búsqueda.</div>
+                  )}
                 </motion.div>
               )}
 
@@ -2679,7 +3021,465 @@ export default function App() {
           </motion.div>
         )}
 
+        {/* VIEW 4: SEPARATE PROFESSOR DETAIL VIEW */}
+        {selectedProfessorId && currentSelectedProfessor && (
+          <motion.div 
+            id="professor-detail-view"
+            initial={{ opacity: 0, scale: 0.98 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="space-y-6 max-w-4xl mx-auto"
+          >
+            {/* Volver button */}
+            <button 
+              onClick={() => setSelectedProfessorId(null)}
+              className="group flex items-center gap-2 text-xs text-zinc-400 hover:text-yellow-400 font-mono tracking-widest font-black uppercase cursor-pointer transition-all pb-2"
+            >
+              <ArrowLeft className="w-4 h-4 transition-transform group-hover:-translate-x-1" />
+              VOLVER AL CAMPUS
+            </button>
+
+            {/* Professor Profile Card */}
+            <div className="bg-[#0b0b0c] border border-zinc-900 rounded-3xl overflow-hidden relative shadow-2xl">
+              
+              {/* Background gradient/cover */}
+              <div className="h-32 bg-gradient-to-r from-zinc-950 via-[#0e0e10] to-zinc-950 relative border-b border-zinc-900/60 overflow-hidden">
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(250,204,21,0.04)_0%,transparent_70%)] animate-pulse" />
+              </div>
+
+              {/* Avatar section */}
+              <div className="px-6 pb-8 relative text-center">
+                
+                {/* Overlapping Avatar */}
+                <div className="relative w-28 h-28 mx-auto -mt-14 mb-4">
+                  <img 
+                    src={currentSelectedProfessor.gender === 'female' 
+                      ? 'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&q=80&w=200' 
+                      : 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=200'
+                    } 
+                    alt={currentSelectedProfessor.name} 
+                    className="w-full h-full rounded-full object-cover border-4 border-yellow-400 shadow-2xl shadow-yellow-400/5"
+                  />
+                  
+                  {/* Rating badge overlapping on bottom-right of avatar */}
+                  <div className="absolute -bottom-1 -right-1 bg-yellow-400 text-black border-2 border-[#0b0b0c] px-2.5 py-1 rounded-full font-mono font-black text-xs shadow-lg flex items-center gap-0.5 select-none">
+                    <span>★</span>
+                    <span>{(() => {
+                      const total = (currentSelectedProfessor.yoTeConozcoCount || 0) + (currentSelectedProfessor.fanCount || 0);
+                      if (total === 0) return '0.0';
+                      const ratio = (currentSelectedProfessor.fanCount || 0) / total;
+                      return (3.0 + ratio * 2.0).toFixed(1);
+                    })()}</span>
+                  </div>
+                </div>
+
+                {/* Name */}
+                <h2 className="text-xl sm:text-2xl font-display font-black text-white uppercase tracking-tight">
+                  {currentSelectedProfessor.name}
+                </h2>
+                
+                {/* Title */}
+                <div className="flex justify-center items-center gap-2 mt-1.5">
+                  <span className="text-[10px] tracking-widest font-mono font-black bg-yellow-400/10 text-yellow-400 px-3 py-1 rounded-full border border-yellow-400/15 uppercase select-none">
+                    DOCENTE DEL CAMPUS
+                  </span>
+                </div>
+
+                {/* Permanent Voting Buttons (Yo te conozco / Fan) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-8 max-w-2xl mx-auto">
+                  
+                  {/* Card 1: Yo te conozco */}
+                  {(() => {
+                    const hasVoted = (userVotes[currentSelectedProfessor.id] || { yoTeConozco: false }).yoTeConozco;
+                    return (
+                      <button
+                        onClick={() => handleVoteProfessorType(currentSelectedProfessor.id, 'yoTeConozco')}
+                        disabled={isVotingProf}
+                        className={`p-6 rounded-2xl border text-center transition-all duration-300 relative group flex flex-col justify-between h-48 cursor-pointer w-full text-left outline-none ${
+                          hasVoted
+                            ? 'bg-yellow-400/5 border-yellow-400/50 shadow-[0_4px_20px_rgba(250,204,21,0.05)]'
+                            : 'bg-zinc-950/60 border-zinc-900 hover:border-yellow-400/30 hover:bg-[#121214]/60'
+                        }`}
+                      >
+                        {/* Icon */}
+                        <div className="flex justify-between items-start w-full">
+                          <span className="text-[10px] font-mono font-black text-zinc-500 uppercase tracking-widest">CATEGORÍA 1</span>
+                          <Users className={`w-5 h-5 ${hasVoted ? 'text-yellow-400' : 'text-zinc-600 group-hover:text-yellow-400 transition-colors'}`} />
+                        </div>
+
+                        {/* Large count */}
+                        <div className="my-2 select-none w-full text-center">
+                          <span className={`text-4xl font-display font-black block tracking-tight ${hasVoted ? 'text-yellow-400' : 'text-white'}`}>
+                            {currentSelectedProfessor.yoTeConozcoCount || 0}
+                          </span>
+                        </div>
+
+                        {/* Bottom text */}
+                        <div className="w-full text-center">
+                          <span className="text-xs font-mono font-black tracking-wider uppercase text-zinc-300 block">
+                            {hasVoted ? '✓ YO TE CONOZCO (Votado)' : 'YO TE CONOZCO'}
+                          </span>
+                          <span className="text-[9px] font-mono font-medium text-zinc-550 uppercase block mt-1">
+                            {hasVoted ? 'Has confirmado que fue tu docente' : 'Haz clic para registrar voto'}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })()}
+
+                  {/* Card 2: Fan */}
+                  {(() => {
+                    const hasVoted = (userVotes[currentSelectedProfessor.id] || { fan: false }).fan;
+                    return (
+                      <button
+                        onClick={() => handleVoteProfessorType(currentSelectedProfessor.id, 'fan')}
+                        disabled={isVotingProf}
+                        className={`p-6 rounded-2xl border text-center transition-all duration-300 relative group flex flex-col justify-between h-48 cursor-pointer w-full text-left outline-none ${
+                          hasVoted
+                            ? 'bg-red-500/5 border-red-500/50 shadow-[0_4px_20px_rgba(239,68,68,0.05)]'
+                            : 'bg-zinc-950/60 border-zinc-900 hover:border-red-500/30 hover:bg-[#121214]/60'
+                        }`}
+                      >
+                        {/* Icon */}
+                        <div className="flex justify-between items-start w-full">
+                          <span className="text-[10px] font-mono font-black text-zinc-500 uppercase tracking-widest">CATEGORÍA 2</span>
+                          <Heart className={`w-5 h-5 ${hasVoted ? 'text-red-500 fill-current' : 'text-zinc-600 group-hover:text-red-500 transition-colors'}`} />
+                        </div>
+
+                        {/* Large count */}
+                        <div className="my-2 select-none w-full text-center">
+                          <span className={`text-4xl font-display font-black block tracking-tight ${hasVoted ? 'text-red-500' : 'text-white'}`}>
+                            {currentSelectedProfessor.fanCount || 0}
+                          </span>
+                        </div>
+
+                        {/* Bottom text */}
+                        <div className="w-full text-center">
+                          <span className="text-xs font-mono font-black tracking-wider uppercase text-zinc-300 block">
+                            {hasVoted ? '❤️ ¡ERES FAN! (Registrado)' : 'FAN'}
+                          </span>
+                          <span className="text-[9px] font-mono font-medium text-zinc-550 uppercase block mt-1">
+                            {hasVoted ? 'Tu admiración ha sido guardada' : 'Haz clic para sumarte como fan'}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })()}
+
+                </div>
+
+                {/* 4 Tags / Tabs row selector */}
+                <div className="flex justify-center mt-6">
+                  <div className="bg-[#121214] border border-zinc-900 rounded-2xl p-1.5 flex gap-1.5 overflow-x-auto max-w-full">
+                    {[
+                      { id: 'Wiki' as const, label: 'Wiki', icon: <BookOpen className="w-3.5 h-3.5" /> },
+                      { id: 'Reseñas' as const, label: 'Reseñas', icon: <Star className="w-3.5 h-3.5" /> },
+                      { id: 'Crushes' as const, label: 'Crushes', icon: <Heart className="w-3.5 h-3.5" /> },
+                      { id: 'Ship' as const, label: 'Ship', icon: <Flame className="w-3.5 h-3.5" /> },
+                    ].map((t) => {
+                      const isActive = activeProfSubTab === t.id;
+                      return (
+                        <button
+                          key={t.id}
+                          onClick={() => setActiveProfSubTab(t.id)}
+                          className={`flex items-center gap-1.5 px-4.5 py-2.5 text-[11px] font-mono font-black uppercase rounded-xl transition-all duration-300 cursor-pointer whitespace-nowrap shrink-0 ${
+                            isActive
+                              ? 'bg-yellow-400 text-black shadow-lg shadow-yellow-400/10'
+                              : 'text-zinc-400 hover:text-white hover:bg-zinc-900/50'
+                          }`}
+                        >
+                          {t.icon}
+                          <span>{t.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Tab content 1: Reseñas */}
+                {activeProfSubTab === 'Reseñas' && (
+                  <div className="mt-8 max-w-2xl mx-auto text-left space-y-6">
+                    {/* Add Written Review Form */}
+                    <form onSubmit={handleSubmitReview} className="bg-[#121214]/60 border border-zinc-900 rounded-2xl p-6 space-y-4">
+                      <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
+                        <div className="flex items-center gap-2">
+                          <Star className="w-4 h-4 text-yellow-400 fill-current" />
+                          <h3 className="font-display font-black text-sm text-white uppercase tracking-wider">Escribir una Reseña sobre {currentSelectedProfessor.name}</h3>
+                        </div>
+                        <span className="text-[9px] font-mono bg-yellow-400/10 text-yellow-400 border border-yellow-400/20 px-2.5 py-1 rounded-full uppercase font-black">
+                          COMPARTIR EXPERIENCIA
+                        </span>
+                      </div>
+                      <textarea
+                        value={newReviewText}
+                        onChange={(e) => setNewReviewText(e.target.value)}
+                        placeholder="Comparte cómo es su clase, su método de evaluación o consejos útiles para futuros alumnos..."
+                        maxLength={350}
+                        rows={4}
+                        className="w-full bg-black border border-zinc-900 rounded-xl p-4 text-xs font-sans text-zinc-100 placeholder-zinc-650 focus:outline-none focus:border-yellow-400/40 resize-none transition-all duration-300"
+                        required
+                      />
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-mono text-zinc-550">
+                          {350 - newReviewText.length} caracteres restantes
+                        </span>
+                        <button
+                          type="submit"
+                          disabled={isSubmittingReview || !newReviewText.trim()}
+                          className="bg-yellow-400 hover:bg-yellow-350 disabled:opacity-40 text-black font-mono font-black text-xs px-5 py-2.5 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all duration-300 uppercase shadow-md shadow-yellow-400/15"
+                        >
+                          <Send className="w-3.5 h-3.5 text-black" />
+                          <span>Enviar Reseña</span>
+                        </button>
+                      </div>
+                    </form>
+
+                    {/* Written Reviews Feed */}
+                    <div className="space-y-3">
+                      <h4 className="text-[10px] tracking-widest font-mono font-black text-zinc-500 uppercase">Reseñas del Campus ({profReviews.length})</h4>
+                      {profReviews.length === 0 ? (
+                        <div className="bg-[#121214]/30 border border-zinc-900/40 p-8 rounded-2xl text-center space-y-1.5">
+                          <Star className="w-5 h-5 text-zinc-600 mx-auto" />
+                          <p className="text-xs text-zinc-550 font-mono italic">Aún no hay reseñas escritas para este docente. ¡Aporta tu opinión para orientar a la comunidad!</p>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 gap-3">
+                          {profReviews.map((review) => (
+                            <div key={review.id} className="bg-gradient-to-br from-[#0c0c0e] to-black border border-zinc-900 p-5 rounded-2xl relative overflow-hidden group hover:border-yellow-400/10 transition-colors">
+                              <div className="absolute top-0 right-0 w-24 h-24 bg-yellow-400/2 rounded-full blur-2xl group-hover:bg-yellow-400/5 transition-all" />
+                              <div className="flex items-start justify-between gap-4">
+                                <div className="space-y-2">
+                                  <p className="text-xs text-zinc-300 leading-relaxed font-sans font-medium">
+                                    "{review.text}"
+                                  </p>
+                                  <div className="flex items-center gap-2 text-[9px] font-mono text-zinc-550">
+                                    <span className="text-yellow-400">★</span>
+                                    <span className="font-bold text-zinc-400">{review.authorName || 'Anónimo'}</span>
+                                    <span>•</span>
+                                    <span>{new Date(review.createdAt || Date.now()).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                                  </div>
+                                </div>
+                                <span className="text-lg shrink-0 select-none">📝</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Tab content 2: Wiki */}
+                {activeProfSubTab === 'Wiki' && (
+                  <div className="mt-8 max-w-2xl mx-auto text-left space-y-6">
+                    <div className="bg-[#121214]/60 border border-zinc-900 rounded-2xl p-6 space-y-4">
+                      <div className="flex items-center gap-2 border-b border-zinc-900 pb-3">
+                        <BookOpen className="w-4 h-4 text-yellow-400" />
+                        <h3 className="font-display font-black text-sm text-white uppercase tracking-wider">INFORMACIÓN GENERAL Y TRAYECTORIA</h3>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4 text-xs font-mono">
+                        <div>
+                          <span className="text-zinc-500 block uppercase text-[10px]">FACULTAD / CENTRO</span>
+                          <span className="text-zinc-200 uppercase font-black">Educación y Ciencias</span>
+                        </div>
+                        <div>
+                          <span className="text-zinc-500 block uppercase text-[10px]">TRAYECTORIA ACADÉMICA</span>
+                          <span className="text-zinc-200 uppercase font-black">10+ Años en Docencia</span>
+                        </div>
+                        <div>
+                          <span className="text-zinc-500 block uppercase text-[10px]">NIVEL DE EXIGENCIA</span>
+                          <span className="text-yellow-400 uppercase font-black">Alto (Valora Esfuerzo)</span>
+                        </div>
+                        <div>
+                          <span className="text-zinc-500 block uppercase text-[10px]">MÉTODO DE ENSEÑANZA</span>
+                          <span className="text-zinc-200 uppercase font-black">Dinámico y Práctico</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-[#121214]/60 border border-zinc-900 rounded-2xl p-6 space-y-4">
+                      <div className="flex items-center gap-2 border-b border-zinc-900 pb-3">
+                        <Sparkles className="w-4 h-4 text-yellow-400" />
+                        <h3 className="font-display font-black text-sm text-white uppercase tracking-wider">INSIGNIAS MÁS VOTADAS POR ESTUDIANTES</h3>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                        {[
+                          { label: 'Explicación Clara', count: 42, icon: '💡' },
+                          { label: 'Muy Comprensivo', count: 29, icon: '🤝' },
+                          { label: 'Clases Divertidas', count: 35, icon: '🎭' },
+                          { label: 'Súper Puntual', count: 18, icon: '⏱️' }
+                        ].map((badge, i) => (
+                          <div key={i} className="bg-[#0b0b0c] border border-zinc-900 p-3 rounded-xl text-center space-y-1 hover:border-yellow-400/10 transition-colors">
+                            <span className="text-lg block">{badge.icon}</span>
+                            <span className="text-[10px] text-zinc-300 font-sans font-bold block leading-tight">{badge.label}</span>
+                            <span className="text-[9px] text-yellow-400 font-mono font-black uppercase">×{badge.count}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Tab content 3: Crushes */}
+                {activeProfSubTab === 'Crushes' && (
+                  <div className="mt-8 max-w-2xl mx-auto text-left space-y-6">
+                    {/* Add Crush Form */}
+                    <form onSubmit={handleSubmitCrush} className="bg-[#121214]/60 border border-zinc-900 rounded-2xl p-6 space-y-4">
+                      <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
+                        <div className="flex items-center gap-2">
+                          <Heart className="w-4 h-4 text-red-500 fill-current" />
+                          <h3 className="font-display font-black text-sm text-white uppercase tracking-wider">CONFESAR UN CRUSH ANÓNIMO</h3>
+                        </div>
+                        <span className="text-[9px] font-mono bg-red-500/10 text-red-400 border border-red-500/20 px-2.5 py-1 rounded-full uppercase font-black">
+                          100% CONFIDENCIAL
+                        </span>
+                      </div>
+                      <textarea
+                        value={newCrushText}
+                        onChange={(e) => setNewCrushText(e.target.value)}
+                        placeholder="Escribe algo lindo sobre este docente (ej: 'Me encanta su paciencia al explicar' o 'Su estilo de vestir es impecable')..."
+                        maxLength={180}
+                        rows={3}
+                        className="w-full bg-black border border-zinc-900 rounded-xl p-4 text-xs font-sans text-zinc-100 placeholder-zinc-650 focus:outline-none focus:border-red-500/40 resize-none transition-all duration-300"
+                        required
+                      />
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-mono text-zinc-550">
+                          {180 - newCrushText.length} caracteres restantes
+                        </span>
+                        <button
+                          type="submit"
+                          disabled={isSubmittingCrush || !newCrushText.trim()}
+                          className="bg-red-500 hover:bg-red-400 disabled:opacity-40 text-white font-mono font-black text-xs px-5 py-2.5 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all duration-300 uppercase shadow-md shadow-red-500/15"
+                        >
+                          <Send className="w-3.5 h-3.5 text-white" />
+                          <span>Enviar Crush</span>
+                        </button>
+                      </div>
+                    </form>
+
+                    {/* Crushes Feed */}
+                    <div className="space-y-3">
+                      <h4 className="text-[10px] tracking-widest font-mono font-black text-zinc-500 uppercase">Muro de Afecto Estudiantil ({profCrushes.length})</h4>
+                      {profCrushes.length === 0 ? (
+                        <div className="bg-[#121214]/30 border border-zinc-900/40 p-8 rounded-2xl text-center space-y-1.5">
+                          <Heart className="w-5 h-5 text-zinc-600 mx-auto" />
+                          <p className="text-xs text-zinc-550 font-mono italic">Aún no hay mensajes de crush en el muro. ¡Sé el primero en confesar algo lindo!</p>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 gap-3">
+                          {profCrushes.map((crush) => (
+                            <div key={crush.id} className="bg-gradient-to-br from-[#0c0c0e] to-black border border-zinc-900 p-5 rounded-2xl relative overflow-hidden group hover:border-red-500/10 transition-colors">
+                              <div className="absolute top-0 right-0 w-24 h-24 bg-red-500/2 rounded-full blur-2xl group-hover:bg-red-500/5 transition-all" />
+                              <div className="flex items-start justify-between gap-4">
+                                <div className="space-y-2">
+                                  <p className="text-xs text-zinc-300 leading-relaxed font-sans italic font-medium">
+                                    "{crush.text}"
+                                  </p>
+                                  <div className="flex items-center gap-2 text-[9px] font-mono text-zinc-500">
+                                    <span className="text-red-400">♥</span>
+                                    <span>{crush.authorName || 'Anónimo'}</span>
+                                    <span>•</span>
+                                    <span>{new Date(crush.createdAt || Date.now()).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}</span>
+                                  </div>
+                                </div>
+                                <span className="text-lg shrink-0 select-none">💌</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Tab content 4: Ship */}
+                {activeProfSubTab === 'Ship' && (
+                  <div className="mt-8 max-w-2xl mx-auto text-left space-y-6">
+                    <div className="bg-[#121214]/60 border border-zinc-900 rounded-2xl p-6 space-y-4">
+                      <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
+                        <div className="flex items-center gap-2">
+                          <Flame className="w-4 h-4 text-orange-400" />
+                          <h3 className="font-display font-black text-sm text-white uppercase tracking-wider">SHIPS Y EMPAREJAMIENTOS DIVERTIDOS</h3>
+                        </div>
+                        <span className="text-[9px] font-mono bg-orange-400/10 text-orange-400 border border-orange-400/20 px-2.5 py-1 rounded-full uppercase font-black">
+                          {userVotedShipId ? 'VOTO REGISTRADO' : 'SELECCIÓN DIVERTIDA'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-zinc-400 font-sans leading-relaxed">
+                        Los "ships" son combinaciones ficticias o divertidas que los estudiantes asocian con este docente. ¡Vota por tu combinación favorita en el campus!
+                      </p>
+
+                      <div className="space-y-4 pt-2">
+                        {(() => {
+                          const maxVotes = Math.max(...profShips.map(s => s.votes || 1), 1);
+                          return profShips.map((ship) => {
+                            const isThisVoted = userVotedShipId === ship.id;
+                            const voteCount = ship.votes || 0;
+                            const percent = Math.min(100, Math.round((voteCount / maxVotes) * 100));
+                            
+                            return (
+                              <div key={ship.id} className="space-y-2">
+                                <div className="flex items-center justify-between gap-4">
+                                  <span className="text-xs font-mono font-black text-zinc-200 uppercase">{ship.label}</span>
+                                  <div className="flex items-center gap-3">
+                                    <span className="text-xs font-mono font-black text-yellow-400">{voteCount} votos</span>
+                                    <button
+                                      disabled={!!userVotedShipId}
+                                      onClick={() => handleVoteShip(ship.id)}
+                                      className={`px-3 py-1 rounded text-[10px] font-mono font-black uppercase transition-all duration-300 ${
+                                        isThisVoted
+                                          ? 'bg-orange-500 text-white border border-orange-600'
+                                          : userVotedShipId
+                                            ? 'bg-zinc-900 text-zinc-650 border border-zinc-900 cursor-not-allowed'
+                                            : 'bg-zinc-900 hover:bg-orange-500/10 hover:text-orange-400 text-zinc-400 border border-zinc-800 cursor-pointer'
+                                      }`}
+                                    >
+                                      {isThisVoted ? '✓ Mi Voto' : 'Votar'}
+                                    </button>
+                                  </div>
+                                </div>
+                                {/* Bar */}
+                                <div className="h-2 bg-black rounded-full overflow-hidden border border-zinc-900">
+                                  <div 
+                                    className={`h-full rounded-full transition-all duration-500 ${isThisVoted ? 'bg-orange-500' : 'bg-yellow-400'}`}
+                                    style={{ width: `${percent}%` }}
+                                  />
+                                </div>
+                              </div>
+                            );
+                          });
+                        })()}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+              </div>
+
+            </div>
+          </motion.div>
+        )}
+
       </main>
+
+      {/* Floating Action Button for registering institutions, only shown on main screen */}
+      {!selectedInstituteId && !selectedAlumnoId && (
+        <div className="fixed bottom-6 right-6 z-40">
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => {
+              setCreateInstituteStep(1);
+              setNewInstituteName('');
+              setIsCreateInstituteModalOpen(true);
+            }}
+            className="flex items-center gap-2 bg-yellow-400 hover:bg-yellow-350 text-black font-mono font-black text-xs px-5 py-4 rounded-full shadow-[0_4px_24px_rgba(250,204,21,0.25)] hover:shadow-[0_8px_32px_rgba(250,204,21,0.35)] transition-all cursor-pointer uppercase tracking-wider outline-none"
+          >
+            <Plus className="w-4 h-4 text-black" />
+            <span>Registrar Institución</span>
+          </motion.button>
+        </div>
+      )}
 
       {/* --- FOOTER --- */}
       <footer className="bg-black border-t border-zinc-950 py-12 px-4 text-center mt-20 relative z-10 text-xs font-mono text-zinc-650">
@@ -2989,7 +3789,9 @@ export default function App() {
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-zinc-950 border border-zinc-900 rounded-3xl p-6 sm:p-8 max-w-md w-full relative z-10 space-y-6 shadow-2xl"
+              className={`bg-zinc-950 border border-zinc-900 rounded-3xl p-6 sm:p-8 w-full relative z-10 space-y-6 shadow-2xl transition-all duration-300 ${
+                createInstituteStep === 1 ? 'max-w-lg' : 'max-w-md'
+              }`}
             >
               <button 
                 onClick={() => setIsCreateInstituteModalOpen(false)}
@@ -2998,47 +3800,251 @@ export default function App() {
                 <X className="w-5 h-5" />
               </button>
 
+              {createInstituteStep === 1 ? (
+                <div className="space-y-6">
+                  <div className="text-center">
+                    <span className="text-[10px] font-mono font-black text-yellow-400 bg-yellow-400/10 border border-yellow-400/20 px-2.5 py-1 rounded-full uppercase tracking-wider">
+                      Paso 1 de 2
+                    </span>
+                    <h3 className="text-xl font-display font-black text-white uppercase tracking-tight mt-3">
+                      Seleccionar Tipo de Institución
+                    </h3>
+                    <p className="text-xs text-zinc-400 mt-1 font-sans font-medium">
+                      Elige el tipo de centro educativo que deseas registrar en la Wiki.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3">
+                    {/* Option 1: Colegio/Escuela */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewInstituteTipo('colegio');
+                        setCreateInstituteStep(2);
+                      }}
+                      className="flex items-center gap-4 p-4 rounded-2xl border border-zinc-900 bg-zinc-950/40 hover:border-yellow-400/40 hover:bg-[#121214]/60 text-left transition-all duration-300 group cursor-pointer outline-none"
+                    >
+                      <div className="w-12 h-12 rounded-xl bg-yellow-400/10 border border-yellow-400/20 flex items-center justify-center text-yellow-400 group-hover:scale-105 transition-transform shrink-0">
+                        <GraduationCap className="w-6 h-6" />
+                      </div>
+                      <div className="space-y-0.5">
+                        <h4 className="text-xs font-mono font-black text-white uppercase tracking-wider group-hover:text-yellow-400 transition-colors">
+                          Escuela / Colegio
+                        </h4>
+                        <p className="text-[10px] text-zinc-400 font-sans font-medium leading-normal">
+                          Para educación primaria, secundaria, institutos escolares o bachilleratos.
+                        </p>
+                      </div>
+                    </button>
+
+                    {/* Option 2: Instituto */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewInstituteTipo('instituto');
+                        setCreateInstituteStep(2);
+                      }}
+                      className="flex items-center gap-4 p-4 rounded-2xl border border-zinc-900 bg-zinc-950/40 hover:border-yellow-400/40 hover:bg-[#121214]/60 text-left transition-all duration-300 group cursor-pointer outline-none"
+                    >
+                      <div className="w-12 h-12 rounded-xl bg-yellow-400/10 border border-yellow-400/20 flex items-center justify-center text-yellow-400 group-hover:scale-105 transition-transform shrink-0">
+                        <Building className="w-6 h-6" />
+                      </div>
+                      <div className="space-y-0.5">
+                        <h4 className="text-xs font-mono font-black text-white uppercase tracking-wider group-hover:text-yellow-400 transition-colors">
+                          Instituto
+                        </h4>
+                        <p className="text-[10px] text-zinc-400 font-sans font-medium leading-normal">
+                          Para educación tecnológica, técnica de nivel superior o pedagógica.
+                        </p>
+                      </div>
+                    </button>
+
+                    {/* Option 3: Universidad */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewInstituteTipo('universidad');
+                        setCreateInstituteStep(2);
+                      }}
+                      className="flex items-center gap-4 p-4 rounded-2xl border border-zinc-900 bg-zinc-950/40 hover:border-yellow-400/40 hover:bg-[#121214]/60 text-left transition-all duration-300 group cursor-pointer outline-none"
+                    >
+                      <div className="w-12 h-12 rounded-xl bg-yellow-400/10 border border-yellow-400/20 flex items-center justify-center text-yellow-400 group-hover:scale-105 transition-transform shrink-0">
+                        <Landmark className="w-6 h-6" />
+                      </div>
+                      <div className="space-y-0.5">
+                        <h4 className="text-xs font-mono font-black text-white uppercase tracking-wider group-hover:text-yellow-400 transition-colors">
+                          Universidad
+                        </h4>
+                        <p className="text-[10px] text-zinc-400 font-sans font-medium leading-normal">
+                          Para universidades públicas, facultades o centros universitarios de posgrado.
+                        </p>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  <div className="text-center">
+                    <button
+                      type="button"
+                      onClick={() => setCreateInstituteStep(1)}
+                      className="text-[10px] font-mono text-zinc-550 hover:text-yellow-400 transition-colors uppercase tracking-wider flex items-center gap-1 mx-auto cursor-pointer"
+                    >
+                      ← Volver a Selección de Tipo
+                    </button>
+                    <h3 className="text-xl font-display font-black text-white uppercase tracking-tight mt-3">
+                      Crear Nueva Institución
+                    </h3>
+                    <p className="text-xs text-zinc-400 mt-1 font-sans font-medium">
+                      Ingresa el nombre oficial para registrar el centro educativo.
+                    </p>
+                  </div>
+
+                  <form onSubmit={handleCreateInstituteSubmit} className="space-y-5">
+                    {/* Selected Type Badge Display */}
+                    <div className="p-3.5 bg-[#0d0d0d] border border-zinc-900 rounded-xl flex items-center justify-between">
+                      <span className="text-[10px] font-mono font-black text-zinc-500 uppercase tracking-widest">Tipo Elegido:</span>
+                      <span className="text-xs font-mono font-black text-yellow-400 uppercase tracking-wider flex items-center gap-1.5">
+                        {newInstituteTipo === 'colegio' ? (
+                          <>
+                            <GraduationCap className="w-3.5 h-3.5" />
+                            Escuela / Colegio
+                          </>
+                        ) : newInstituteTipo === 'instituto' ? (
+                          <>
+                            <Building className="w-3.5 h-3.5" />
+                            Instituto
+                          </>
+                        ) : (
+                          <>
+                            <Landmark className="w-3.5 h-3.5" />
+                            Universidad
+                          </>
+                        )}
+                      </span>
+                    </div>
+
+                    {/* School Name */}
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-black block">Nombre de la Institución *</label>
+                      <input
+                        type="text"
+                        required
+                        value={newInstituteName}
+                        onChange={(e) => setNewInstituteName(e.target.value)}
+                        placeholder={
+                          newInstituteTipo === 'colegio' 
+                            ? "Ej. Colegio Emblemático Coronel Bolognesi" 
+                            : newInstituteTipo === 'instituto'
+                            ? "Ej. Instituto de Educación Superior Pedagógico de Uchiza"
+                            : "Ej. Universidad Nacional del Altiplano"
+                        }
+                        className="w-full bg-[#0d0d0d] focus:bg-[#121212] border border-zinc-900 focus:border-yellow-400 text-xs p-3.5 rounded-xl text-zinc-100 outline-none transition-all duration-200 font-sans font-medium placeholder-zinc-700"
+                        autoFocus
+                      />
+                    </div>
+
+                    <div className="pt-2 flex gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setCreateInstituteStep(1)}
+                        className="w-1/3 bg-zinc-900 hover:bg-zinc-850 text-zinc-400 hover:text-white font-mono font-black text-xs py-3.5 rounded-xl transition-all duration-300 uppercase tracking-widest cursor-pointer"
+                      >
+                        Atrás
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={isSubmittingInstitute}
+                        className="w-2/3 bg-yellow-400 hover:bg-yellow-350 disabled:bg-zinc-850 disabled:text-zinc-500 text-black font-mono font-black text-xs py-3.5 rounded-xl transition-all duration-300 uppercase tracking-widest cursor-pointer shadow-lg shadow-yellow-400/10 hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-1.5"
+                      >
+                        {isSubmittingInstitute ? (
+                          'Creando...'
+                        ) : (
+                          <>
+                            <Plus className="w-3.5 h-3.5 text-black" />
+                            <span>Crear Institución</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* --- MODAL 5: AGREGAR PROFESOR --- */}
+      <AnimatePresence>
+        {isAddProfessorModalOpen && (
+          <div id="add-professor-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            {/* Backdrop */}
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/90 backdrop-blur-sm shadow-2xl"
+              onClick={() => setIsAddProfessorModalOpen(false)}
+            />
+            {/* Box */}
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-zinc-950 border border-zinc-900 rounded-3xl p-6 sm:p-8 max-w-md w-full relative z-10 space-y-6 shadow-2xl"
+            >
+              <button 
+                onClick={() => setIsAddProfessorModalOpen(false)}
+                className="absolute top-4 right-4 text-zinc-500 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
               <div className="text-center">
                 <h3 className="text-xl font-display font-black text-white uppercase tracking-tight">
-                  Crear Nueva Institución
+                  Agregar Profesor al Campus
                 </h3>
                 <p className="text-xs text-zinc-400 mt-1 font-sans font-medium">
-                  Añade una nueva institución pública a la plataforma.
+                  Añade un nuevo docente al directorio de esta institución.
                 </p>
               </div>
 
-              <form onSubmit={handleCreateInstituteSubmit} className="space-y-4 pt-2">
-                {/* School Name */}
+              <form onSubmit={handleAddProfessor} className="space-y-4 pt-2">
+                {/* Professor Name */}
                 <div className="space-y-1.5">
-                  <label className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-black block">Nombre de la Institución *</label>
+                  <label className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-black block">Nombre del Profesor *</label>
                   <input
                     type="text"
                     required
-                    value={newInstituteName}
-                    onChange={(e) => setNewInstituteName(e.target.value)}
-                    placeholder="Ej. Instituto de Educación Superior Pedagógico de Uchiza"
+                    value={newProfName}
+                    onChange={(e) => setNewProfName(e.target.value)}
+                    placeholder="Ej. Dr. Alberto Valdivia Santillán"
                     className="w-full bg-[#0d0d0d] focus:bg-[#121212] border border-zinc-900 focus:border-yellow-400 text-xs p-3.5 rounded-xl text-zinc-100 outline-none transition-all duration-200 font-sans font-medium placeholder-zinc-700"
                   />
                 </div>
 
-                {/* Institution Type Select Buttons */}
+                {/* Professor Gender Selection */}
                 <div className="space-y-1.5">
-                  <label className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-black block">Tipo de Institución *</label>
-                  <div className="grid grid-cols-3 gap-2 pt-1">
-                    {['instituto', 'universidad', 'colegio'].map(t => {
-                      const isSelected = newInstituteTipo === t;
+                  <label className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-black block">Género *</label>
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    {[
+                      { value: 'male', label: 'Masculino 👨‍🏫' },
+                      { value: 'female', label: 'Femenino 👩‍🏫' }
+                    ].map(g => {
+                      const isSelected = newProfGender === g.value;
                       return (
                         <button
-                          key={t}
+                          key={g.value}
                           type="button"
-                          onClick={() => setNewInstituteTipo(t)}
-                          className={`py-3 px-2 border rounded-xl font-mono text-[10px] sm:text-xs font-black uppercase transition-all cursor-pointer ${
+                          onClick={() => setNewProfGender(g.value as any)}
+                          className={`py-3 px-2 border rounded-xl font-mono text-xs font-black uppercase transition-all cursor-pointer ${
                             isSelected 
                               ? 'bg-yellow-400 text-black border-yellow-400 shadow-[0_4px_12px_rgba(250,204,21,0.15)] scale-[1.02]' 
                               : 'bg-[#0d0d0d]/80 text-zinc-400 border-zinc-900 hover:border-zinc-800'
                           }`}
                         >
-                          {t === 'instituto' ? 'Instituto' : t === 'universidad' ? 'Universidad' : 'Colegio'}
+                          {g.label}
                         </button>
                       );
                     })}
@@ -3048,10 +4054,10 @@ export default function App() {
                 <div className="pt-4">
                   <button
                     type="submit"
-                    disabled={isSubmittingInstitute}
+                    disabled={isSubmittingProf}
                     className="w-full bg-yellow-400 hover:bg-yellow-350 disabled:bg-zinc-850 disabled:text-zinc-500 text-black font-mono font-black text-xs py-3.5 rounded-xl transition-all duration-300 uppercase tracking-widest cursor-pointer shadow-lg shadow-yellow-400/10 hover:-translate-y-0.5 active:translate-y-0"
                   >
-                    {isSubmittingInstitute ? 'Creando...' : 'Crear Institución'}
+                    {isSubmittingProf ? 'Guardando...' : 'Guardar Profesor'}
                   </button>
                 </div>
               </form>

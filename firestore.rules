@@ -60,6 +60,16 @@ service cloud.firestore {
       allow create: if isValidCentroEducativo(request.resource.data);
       allow update: if isValidCentroEducativo(request.resource.data);
       allow delete: if false;
+
+      // Profesores subcollection inside each educational center
+      match /profesores/{profesorId} {
+        allow read, write: if true;
+      }
+    }
+
+    // Perfiles general collection (currently used for professors profiles)
+    match /perfiles/{perfilId} {
+      allow read, write: if true;
     }
 
     // Alumnos collection
