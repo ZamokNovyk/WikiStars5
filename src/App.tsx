@@ -1490,11 +1490,11 @@ export default function App() {
                     triggerNotice('Para instalar en Android/Chrome, pulsa el icono de instalación (⊕) o "Instalar Aplicación" en el menú. En iOS, pulsa Compartir y "Añadir a pantalla de inicio".');
                   }
                 }}
-                className="hidden sm:flex items-center gap-2 border border-yellow-400/20 hover:border-yellow-400/80 text-yellow-400 text-xs px-4 py-2 rounded-full font-bold font-mono tracking-wider transition-all duration-300 cursor-pointer bg-yellow-400/5 hover:bg-yellow-400/10 hover:-translate-y-0.5 relative"
+                className="flex items-center gap-2 border border-yellow-400/20 hover:border-yellow-400/80 text-yellow-400 text-xs px-2 sm:px-4 py-2 rounded-full font-bold font-mono tracking-wider transition-all duration-300 cursor-pointer bg-yellow-400/5 hover:bg-yellow-400/10 hover:-translate-y-0.5 relative"
                 title="Habilitar instalación en tu dispositivo"
               >
                 <Download className="w-3.5 h-3.5 text-yellow-400 animate-pulse" />
-                <span>INSTALAR APP</span>
+                <span className="hidden sm:block">INSTALAR APP</span>
                 {deferredPrompt && (
                   <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-yellow-400 rounded-full animate-ping" />
                 )}
