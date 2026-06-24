@@ -37,7 +37,9 @@ import {
   List,
   Grid,
   HeartCrack,
-  Lock
+  Lock,
+  Home,
+  User
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Institute, Alumno, AlumnoComment } from './types';
@@ -143,6 +145,22 @@ export default function App() {
   const [votedVersus, setVotedVersus] = useState<string | null>(null);
   const [streakClaimed, setStreakClaimed] = useState(false);
   const [userStreakCount, setUserStreakCount] = useState(2);
+
+  // Tab navigation for mobile
+  const [activeBottomTab, setActiveBottomTab] = useState<'feed' | 'profile'>('feed');
+  const [userProfile, setUserProfile] = useState<any>(null);
+
+  useEffect(() => {
+    if (activeBottomTab === 'profile' && currentUser?.userId) {
+      const fetchProfile = async () => {
+        const userDoc = await getDoc(doc(db, 'users', currentUser.userId));
+        if (userDoc.exists()) {
+          setUserProfile(userDoc.data());
+        }
+      };
+      fetchProfile();
+    }
+  }, [activeBottomTab, currentUser]);
 
   // Real-time Professors & Add Professor States
   const [professors, setProfessors] = useState<any[]>([]);
@@ -4085,6 +4103,30 @@ export default function App() {
       </AnimatePresence>
 
       {/* Floating Action Button (FAB) removed */}
+
+      {/* --- BOTTOM NAVIGATION --- */}
+      <div className="fixed bottom-0 left-0 right-0 z-50 bg-black border-t border-zinc-900 flex justify-around p-3">
+        <button onClick={() => setActiveBottomTab('feed')} className={`flex flex-col items-center gap-1 ${activeBottomTab === 'feed' ? 'text-yellow-400' : 'text-zinc-500'}`}>
+          <Home className="w-5 h-5" />
+          <span className="text-[10px] uppercase font-bold">Feed</span>
+        </button>
+        <button onClick={() => setActiveBottomTab('profile')} className={`flex flex-col items-center gap-1 ${activeBottomTab === 'profile' ? 'text-yellow-400' : 'text-zinc-500'}`}>
+          <User className="w-5 h-5" />
+          <span className="text-[10px] uppercase font-bold">Mi Perfil</span>
+        </button>
+      </div>
+
+      {activeBottomTab === 'profile' && userProfile && (
+        <div className="fixed inset-0 z-40 bg-black pt-20 p-6">
+          <button onClick={() => setActiveBottomTab('feed')} className="text-white mb-6">← Volver al Feed</button>
+          <h2 className="text-white font-display font-black text-2xl uppercase">Mi Perfil</h2>
+          <div className="mt-6 bg-zinc-900 p-6 rounded-2xl flex flex-col items-center">
+             <img src={userProfile.photoURL} className="w-20 h-20 rounded-full border-2 border-yellow-400" />
+             <h3 className="text-white font-bold text-lg mt-4">{userProfile.displayName}</h3>
+             <p className="text-zinc-400 font-mono text-xs mt-1">{userProfile.email}</p>
+          </div>
+        </div>
+      )}
 
     </div>
   );
