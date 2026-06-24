@@ -147,7 +147,8 @@ export default function App() {
   // Real-time Professors & Add Professor States
   const [professors, setProfessors] = useState<any[]>([]);
   const [isAddProfessorModalOpen, setIsAddProfessorModalOpen] = useState(false);
-  const [newProfName, setNewProfName] = useState('');
+  const [newProfNombre, setNewProfNombre] = useState('');
+  const [newProfApellidos, setNewProfApellidos] = useState('');
   const [newProfCourse, setNewProfCourse] = useState('');
   const [newProfGender, setNewProfGender] = useState<'male' | 'female'>('male');
   const [newProfApproval, setNewProfApproval] = useState(95);
@@ -378,15 +379,15 @@ export default function App() {
       if (snapshot.empty) {
         // Seed initial 4 professors for this school
         const initialProfs = [
-          { name: 'Dr. Alberto Valdivia Santillán', gender: 'male' },
-          { name: 'Mag. Carmen Montenegro Ruiz', gender: 'female' },
-          { name: 'Lic. Eulogio Daza Simon', gender: 'male' },
-          { name: 'Ing. Ronald Alva Castro', gender: 'male' }
+          { nombreCompleto: 'Dr. Alberto Valdivia Santillán', gender: 'male' },
+          { nombreCompleto: 'Mag. Carmen Montenegro Ruiz', gender: 'female' },
+          { nombreCompleto: 'Lic. Eulogio Daza Simon', gender: 'male' },
+          { nombreCompleto: 'Ing. Ronald Alva Castro', gender: 'male' }
         ];
         
         try {
           for (const prof of initialProfs) {
-            const profId = prof.name
+            const profId = prof.nombreCompleto
               .toLowerCase()
               .normalize('NFD')
               .replace(/[\u0300-\u036f]/g, '')
@@ -394,10 +395,10 @@ export default function App() {
               .trim()
               .replace(/\s+/g, '.');
 
-            const { searchTokens, searchKeywords } = generateSearchArrays(prof.name);
+            const { searchTokens, searchKeywords } = generateSearchArrays(prof.nombreCompleto);
             const profData = {
               id: profId,
-              name: prof.name,
+              nombreCompleto: prof.nombreCompleto,
               gender: prof.gender,
               instituteId: selectedInstituteId,
               createdAt: new Date().toISOString(),
@@ -544,11 +545,12 @@ export default function App() {
 
   const handleAddProfessor = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedInstituteId || !newProfName.trim()) return;
+    if (!selectedInstituteId || !newProfNombre.trim() || !newProfApellidos.trim()) return;
 
     setIsSubmittingProf(true);
     try {
-      const profId = newProfName.trim()
+      const nombreCompleto = `${newProfNombre.trim()} ${newProfApellidos.trim()}`;
+      const profId = nombreCompleto
         .toLowerCase()
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '')
@@ -556,11 +558,13 @@ export default function App() {
         .trim()
         .replace(/\s+/g, '.');
 
-      const { searchTokens, searchKeywords } = generateSearchArrays(newProfName.trim());
+      const { searchTokens, searchKeywords } = generateSearchArrays(nombreCompleto.trim());
 
       const profData = {
         id: profId,
-        name: newProfName.trim(),
+        nombreCompleto: nombreCompleto.trim(),
+        nombre: newProfNombre.trim(),
+        apellidos: newProfApellidos.trim(),
         gender: newProfGender,
         instituteId: selectedInstituteId,
         createdAt: new Date().toISOString(),
@@ -578,13 +582,14 @@ export default function App() {
         tipo: 'profesor'
       });
 
-      setNewProfName('');
+      setNewProfNombre('');
+      setNewProfApellidos('');
       setNewProfCourse('');
       setNewProfGender('male');
       setNewProfApproval(95);
       setIsAddProfessorModalOpen(false);
       
-      pushSocialLog(`👨‍🏫 Se agregó al profesor ${profData.name.split(' ')[0]} en el campus!`);
+      pushSocialLog(`👨‍🏫 Se agregó al profesor ${profData.nombreCompleto.split(' ')[0]} en el campus!`);
       triggerNotice('¡Profesor agregado exitosamente!');
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `centros.educativos/${selectedInstituteId}/profesores`);
@@ -1332,12 +1337,12 @@ export default function App() {
     if (queryWords.length === 0) return professors;
 
     const scored = professors.map(prof => {
-      const nameNorm = normalizeText(prof.name);
+      const nameNorm = normalizeText(prof.nombreCompleto);
       
       let matchedWordsCount = 0;
       queryWords.forEach(word => {
-        const tokens = prof.searchTokens || generateSearchArrays(prof.name).searchTokens;
-        const keywords = prof.searchKeywords || generateSearchArrays(prof.name).searchKeywords;
+        const tokens = prof.searchTokens || generateSearchArrays(prof.nombreCompleto).searchTokens;
+        const keywords = prof.searchKeywords || generateSearchArrays(prof.nombreCompleto).searchKeywords;
         const matchesTokenOrKeyword = tokens.some((t: string) => t.startsWith(word) || word.startsWith(t)) || keywords.includes(word);
 
         if (nameNorm.includes(word) || matchesTokenOrKeyword) {
@@ -2532,7 +2537,7 @@ export default function App() {
                               {prof.gender === 'male' ? '👨‍🏫' : '👩‍🏫'}
                             </div>
                             <div className="min-w-0">
-                              <h4 className="font-sans font-bold text-white text-sm uppercase group-hover:text-yellow-400 transition-colors truncate">{prof.name}</h4>
+                              <h4 className="font-sans font-bold text-white text-sm uppercase group-hover:text-yellow-400 transition-colors truncate">{prof.nombreCompleto}</h4>
                               <div className="flex items-center gap-2 mt-0.5 font-mono text-[9px] text-zinc-500 uppercase font-black">
                                 <span className="text-zinc-400">Docente</span>
                                 <span>•</span>
@@ -4012,16 +4017,29 @@ export default function App() {
 
               <form onSubmit={handleAddProfessor} className="space-y-4 pt-2">
                 {/* Professor Name */}
-                <div className="space-y-1.5">
-                  <label className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-black block">Nombre del Profesor *</label>
-                  <input
-                    type="text"
-                    required
-                    value={newProfName}
-                    onChange={(e) => setNewProfName(e.target.value)}
-                    placeholder="Ej. Dr. Alberto Valdivia Santillán"
-                    className="w-full bg-[#0d0d0d] focus:bg-[#121212] border border-zinc-900 focus:border-yellow-400 text-xs p-3.5 rounded-xl text-zinc-100 outline-none transition-all duration-200 font-sans font-medium placeholder-zinc-700"
-                  />
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-black block">Nombre *</label>
+                    <input
+                      type="text"
+                      required
+                      value={newProfNombre}
+                      onChange={(e) => setNewProfNombre(e.target.value)}
+                      placeholder="Ej. Alberto"
+                      className="w-full bg-[#0d0d0d] focus:bg-[#121212] border border-zinc-900 focus:border-yellow-400 text-xs p-3.5 rounded-xl text-zinc-100 outline-none transition-all duration-200 font-sans font-medium placeholder-zinc-700"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-black block">Apellidos *</label>
+                    <input
+                      type="text"
+                      required
+                      value={newProfApellidos}
+                      onChange={(e) => setNewProfApellidos(e.target.value)}
+                      placeholder="Ej. Valdivia Santillán"
+                      className="w-full bg-[#0d0d0d] focus:bg-[#121212] border border-zinc-900 focus:border-yellow-400 text-xs p-3.5 rounded-xl text-zinc-100 outline-none transition-all duration-200 font-sans font-medium placeholder-zinc-700"
+                    />
+                  </div>
                 </div>
 
                 {/* Professor Gender Selection */}
