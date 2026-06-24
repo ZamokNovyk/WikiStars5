@@ -1004,8 +1004,13 @@ export default function App() {
               setGlobalSearch('');
             }}
           >
-            <div className="w-10 h-10 bg-yellow-400 rounded-xl flex items-center justify-center font-display font-black text-black text-xl transition-all duration-300 group-hover:scale-105 active:scale-95 shadow-[0_0_20px_rgba(250,204,21,0.2)]">
-              W
+            <div className="w-10 h-10 bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden flex items-center justify-center transition-all duration-300 group-hover:scale-105 active:scale-95 shadow-[0_0_20px_rgba(250,204,21,0.15)]">
+              <img 
+                src="https://firebasestorage.googleapis.com/v0/b/wikistars5-465e1.firebasestorage.app/o/wikistars5logo.png?alt=media&token=026f822e-3b69-4538-b0ef-28dacb65551e" 
+                alt="WikiStars Logo" 
+                className="w-full h-full object-cover"
+                referrerPolicy="no-referrer"
+              />
             </div>
             <div className="flex items-baseline font-display text-lg tracking-widest font-black text-white">
               WIKISTARS
@@ -2680,7 +2685,14 @@ export default function App() {
       <footer className="bg-black border-t border-zinc-950 py-12 px-4 text-center mt-20 relative z-10 text-xs font-mono text-zinc-650">
         <div className="max-w-7xl mx-auto space-y-4">
           <div className="flex justify-center items-center gap-3">
-            <span className="w-8 h-8 rounded-lg bg-yellow-400/10 text-yellow-400 flex items-center justify-center font-black font-display text-base border border-yellow-400/30 shadow-[0_0_10px_rgba(250,204,21,0.1)]">W</span>
+            <div className="w-8 h-8 rounded-lg bg-zinc-900 border border-zinc-800 overflow-hidden flex items-center justify-center shadow-[0_0_10px_rgba(250,204,21,0.05)]">
+              <img 
+                src="https://firebasestorage.googleapis.com/v0/b/wikistars5-465e1.firebasestorage.app/o/wikistars5logo.png?alt=media&token=026f822e-3b69-4538-b0ef-28dacb65551e" 
+                alt="WikiStars Logo" 
+                className="w-full h-full object-cover"
+                referrerPolicy="no-referrer"
+              />
+            </div>
             <span className="font-display font-black text-white text-xs tracking-widest uppercase">WIKISTARS 5</span>
           </div>
           <p className="max-w-md mx-auto leading-relaxed text-[11px] text-zinc-500 font-sans font-medium">
