@@ -45,7 +45,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Institute, Alumno, AlumnoComment } from './types';
 import { INITIAL_INSTITUTES, INITIAL_ALUMNOS, INITIAL_COMMENTS } from './data';
 import { db, auth, handleFirestoreError, OperationType } from './firebase';
-import { collection, doc, setDoc, getDoc, onSnapshot, serverTimestamp, increment, runTransaction } from 'firebase/firestore';
+import { collection, doc, setDoc, getDoc, deleteDoc, onSnapshot, serverTimestamp, increment, runTransaction } from 'firebase/firestore';
 import { GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 
 function generateDocId(rawName: string) {
@@ -365,10 +365,11 @@ export default function App() {
     const userId = auth.currentUser?.uid || getGuestId();
     
     const checkUserVotes = async () => {
+      if (!selectedInstituteId) return;
       try {
-        const yoRef = doc(db, `perfiles/${selectedProfessorId}/yoTeConozco`, userId);
-        const fanRef = doc(db, `perfiles/${selectedProfessorId}/fan`, userId);
-        const crushRef = doc(db, `perfiles/${selectedProfessorId}/crushes`, userId);
+        const yoRef = doc(db, `centros.educativos/${selectedInstituteId}/profesores/${selectedProfessorId}/${'yoTeConozco'}`, userId);
+        const fanRef = doc(db, `centros.educativos/${selectedInstituteId}/profesores/${selectedProfessorId}/${'fan'}`, userId);
+        const crushRef = doc(db, `centros.educativos/${selectedInstituteId}/profesores/${selectedProfessorId}/${'crushes'}`, userId);
         
         const [yoSnap, fanSnap, crushSnap] = await Promise.all([getDoc(yoRef), getDoc(fanRef), getDoc(crushRef)]);
         
@@ -399,9 +400,10 @@ export default function App() {
     }
 
     const userId = auth.currentUser?.uid || getGuestId();
+    if (!selectedInstituteId) return;
 
     // 1. Sync Crushes
-    const crushesRef = collection(db, `perfiles/${selectedProfessorId}/crushes`);
+    const crushesRef = collection(db, `centros.educativos/${selectedInstituteId}/profesores/${selectedProfessorId}/crushes`);
     const unsubCrushes = onSnapshot(crushesRef, (snapshot) => {
       const list: any[] = [];
       snapshot.forEach((docSnap) => {
@@ -412,7 +414,7 @@ export default function App() {
     });
 
     // 2. Sync Ships
-    const shipsRef = collection(db, `perfiles/${selectedProfessorId}/ships`);
+    const shipsRef = collection(db, `centros.educativos/${selectedInstituteId}/profesores/${selectedProfessorId}/ships`);
     const unsubShips = onSnapshot(shipsRef, async (snapshot) => {
       if (snapshot.empty) {
         const initialShips = [
@@ -423,7 +425,7 @@ export default function App() {
         ];
         try {
           for (const s of initialShips) {
-            await setDoc(doc(db, `perfiles/${selectedProfessorId}/ships`, s.id), s);
+            await setDoc(doc(db, `centros.educativos/${selectedInstituteId}/profesores/${selectedProfessorId}/ships`, s.id), s);
           }
         } catch (err) {
           console.warn("Failed to seed initial ships:", err);
@@ -439,7 +441,7 @@ export default function App() {
     });
 
     // 3. Sync Reviews (Reseñas)
-    const reviewsRef = collection(db, `perfiles/${selectedProfessorId}/reviews`);
+    const reviewsRef = collection(db, `centros.educativos/${selectedInstituteId}/profesores/${selectedProfessorId}/reviews`);
     const unsubReviews = onSnapshot(reviewsRef, (snapshot) => {
       const list: any[] = [];
       snapshot.forEach((docSnap) => {
@@ -540,43 +542,26 @@ export default function App() {
     try {
       await runTransaction(db, async (transaction) => {
         const timestamp = new Date().toISOString();
-        const perfDocRef = doc(db, 'perfiles', profId);
         const instDocRef = selectedInstituteId ? doc(db, `centros.educativos/${selectedInstituteId}/profesores`, profId) : null;
         
+        if (!instDocRef) throw new Error("No institute selected");
+
         // 1. If currently voted, remove it
         if (isCurrentlyVoted) {
-          transaction.delete(doc(db, `perfiles/${profId}/${type}`, userId));
-          if (instDocRef) {
-            transaction.delete(doc(db, `centros.educativos/${selectedInstituteId}/profesores/${profId}/${type}`, userId));
-          }
-          transaction.set(perfDocRef, { [type === 'yoTeConozco' ? 'yoTeConozcoCount' : 'fanCount']: increment(-1) }, { merge: true });
-          if (instDocRef) {
-            transaction.set(instDocRef, { [type === 'yoTeConozco' ? 'yoTeConozcoCount' : 'fanCount']: increment(-1) }, { merge: true });
-          }
+          transaction.delete(doc(db, `centros.educativos/${selectedInstituteId}/profesores/${profId}/${type}`, userId));
+          transaction.set(instDocRef, { [type === 'yoTeConozco' ? 'yoTeConozcoCount' : 'fanCount']: increment(-1) }, { merge: true });
         }
         
         // 2. If other voted, remove it
         if (isOtherVoted) {
-          transaction.delete(doc(db, `perfiles/${profId}/${otherType}`, userId));
-          if (instDocRef) {
-            transaction.delete(doc(db, `centros.educativos/${selectedInstituteId}/profesores/${profId}/${otherType}`, userId));
-          }
-          transaction.set(perfDocRef, { [otherType === 'yoTeConozco' ? 'yoTeConozcoCount' : 'fanCount']: increment(-1) }, { merge: true });
-          if (instDocRef) {
-            transaction.set(instDocRef, { [otherType === 'yoTeConozco' ? 'yoTeConozcoCount' : 'fanCount']: increment(-1) }, { merge: true });
-          }
+          transaction.delete(doc(db, `centros.educativos/${selectedInstituteId}/profesores/${profId}/${otherType}`, userId));
+          transaction.set(instDocRef, { [otherType === 'yoTeConozco' ? 'yoTeConozcoCount' : 'fanCount']: increment(-1) }, { merge: true });
         }
         
         // 3. If it was NOT currently voted, add it (this handles both toggling ON and switching from other)
         if (!isCurrentlyVoted) {
-          transaction.set(doc(db, `perfiles/${profId}/${type}`, userId), { votedAt: timestamp });
-          if (instDocRef) {
-            transaction.set(doc(db, `centros.educativos/${selectedInstituteId}/profesores/${profId}/${type}`, userId), { votedAt: timestamp });
-          }
-          transaction.set(perfDocRef, { [type === 'yoTeConozco' ? 'yoTeConozcoCount' : 'fanCount']: increment(1) }, { merge: true });
-          if (instDocRef) {
-            transaction.set(instDocRef, { [type === 'yoTeConozco' ? 'yoTeConozcoCount' : 'fanCount']: increment(1) }, { merge: true });
-          }
+          transaction.set(doc(db, `centros.educativos/${selectedInstituteId}/profesores/${profId}/${type}`, userId), { votedAt: timestamp });
+          transaction.set(instDocRef, { [type === 'yoTeConozco' ? 'yoTeConozcoCount' : 'fanCount']: increment(1) }, { merge: true });
         }
       });
       
@@ -607,31 +592,23 @@ export default function App() {
     
     setIsVotingProf(true);
     try {
-      const timestamp = new Date().toISOString();
-      const perfCrushRef = doc(db, `perfiles/${profId}/crushes`, userId);
-      const perfDocRef = doc(db, 'perfiles', profId);
+      await runTransaction(db, async (transaction) => {
+        const timestamp = new Date().toISOString();
+        const instDocRef = selectedInstituteId ? doc(db, `centros.educativos/${selectedInstituteId}/profesores`, profId) : null;
+        const instCrushRef = selectedInstituteId ? doc(db, `centros.educativos/${selectedInstituteId}/profesores/${profId}/crushes`, userId) : null;
 
-      if (hasCrush) {
-        // Remove crush
-        await deleteDoc(perfCrushRef);
-        if (selectedInstituteId) {
-          await deleteDoc(doc(db, `centros.educativos/${selectedInstituteId}/profesores/${profId}/crushes`, userId));
+        if (!instDocRef || !instCrushRef) throw new Error("No institute selected");
+
+        if (hasCrush) {
+          // Remove crush
+          transaction.delete(instCrushRef);
+          transaction.set(instDocRef, { crushesCount: increment(-1) }, { merge: true });
+        } else {
+          // Add crush
+          transaction.set(instCrushRef, { votedAt: timestamp });
+          transaction.set(instDocRef, { crushesCount: increment(1) }, { merge: true });
         }
-        await setDoc(perfDocRef, { crushesCount: increment(-1) }, { merge: true });
-        if (selectedInstituteId) {
-          await setDoc(doc(db, `centros.educativos/${selectedInstituteId}/profesores`, profId), { crushesCount: increment(-1) }, { merge: true });
-        }
-      } else {
-        // Add crush
-        await setDoc(perfCrushRef, { votedAt: timestamp });
-        if (selectedInstituteId) {
-          await setDoc(doc(db, `centros.educativos/${selectedInstituteId}/profesores/${profId}/crushes`, userId), { votedAt: timestamp });
-        }
-        await setDoc(perfDocRef, { crushesCount: increment(1) }, { merge: true });
-        if (selectedInstituteId) {
-          await setDoc(doc(db, `centros.educativos/${selectedInstituteId}/profesores`, profId), { crushesCount: increment(1) }, { merge: true });
-        }
-      }
+      });
       
       setUserVotes(prev => ({
         ...prev,
@@ -3118,7 +3095,7 @@ export default function App() {
                 {/* Title */}
                 <div className="flex justify-center items-center gap-2 mt-1.5">
                   <span className="text-[10px] tracking-widest font-mono font-black bg-yellow-400/10 text-yellow-400 px-3 py-1 rounded-full border border-yellow-400/15 uppercase select-none">
-                    DOCENTE DEL CAMPUS
+                    {currentSelectedProfessor.nombreCompleto || currentSelectedProfessor.name || 'DOCENTE'}
                   </span>
                 </div>
 
