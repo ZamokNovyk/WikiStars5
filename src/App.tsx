@@ -367,55 +367,11 @@ export default function App() {
 
     const path = `centros.educativos/${selectedInstituteId}/profesores`;
     const unsubscribe = onSnapshot(collection(db, path), async (snapshot) => {
-      if (snapshot.empty) {
-        // Seed initial 4 professors for this school
-        const initialProfs = [
-          { nombreCompleto: 'Dr. Alberto Valdivia Santillán', gender: 'male' },
-          { nombreCompleto: 'Mag. Carmen Montenegro Ruiz', gender: 'female' },
-          { nombreCompleto: 'Lic. Eulogio Daza Simon', gender: 'male' },
-          { nombreCompleto: 'Ing. Ronald Alva Castro', gender: 'male' }
-        ];
-        
-        try {
-          for (const prof of initialProfs) {
-            const profId = prof.nombreCompleto
-              .toLowerCase()
-              .normalize('NFD')
-              .replace(/[\u0300-\u036f]/g, '')
-              .replace(/[^a-z0-9\s.-]/g, '')
-              .trim()
-              .replace(/\s+/g, '.');
-
-            const { searchTokens, searchKeywords } = generateSearchArrays(prof.nombreCompleto);
-            const profData = {
-              id: profId,
-              nombreCompleto: prof.nombreCompleto,
-              gender: prof.gender,
-              instituteId: selectedInstituteId,
-              createdAt: new Date().toISOString(),
-              searchTokens,
-              searchKeywords
-            };
-            
-            // Save in institute's subcollection
-            await setDoc(doc(db, `centros.educativos/${selectedInstituteId}/profesores`, profId), profData);
-            
-            // Save in root '/perfiles' collection
-            await setDoc(doc(db, 'perfiles', profId), {
-              ...profData,
-              tipo: 'profesor'
-            });
-          }
-        } catch (err) {
-          console.error("Failed to seed professors:", err);
-        }
-      } else {
-        const list: any[] = [];
-        snapshot.forEach((snapDoc) => {
-          list.push(snapDoc.data());
-        });
-        setProfessors(list);
-      }
+      const list: any[] = [];
+      snapshot.forEach((snapDoc) => {
+        list.push(snapDoc.data());
+      });
+      setProfessors(list);
     }, (error) => {
       console.warn("Could not fetch professors:", error);
     });
