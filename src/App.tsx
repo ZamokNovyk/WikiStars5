@@ -39,13 +39,17 @@ import {
   HeartCrack,
   Lock,
   Home,
-  User
+  User,
+  History,
+  Trash2,
+  Edit,
+  Edit2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Institute, Alumno, AlumnoComment } from './types';
 import { INITIAL_INSTITUTES, INITIAL_ALUMNOS, INITIAL_COMMENTS } from './data';
 import { db, auth, handleFirestoreError, OperationType } from './firebase';
-import { collection, doc, setDoc, getDoc, deleteDoc, onSnapshot, serverTimestamp, increment, runTransaction } from 'firebase/firestore';
+import { collection, doc, setDoc, getDoc, getDocs, deleteDoc, onSnapshot, serverTimestamp, increment, runTransaction, deleteField } from 'firebase/firestore';
 import { GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 
 function generateDocId(rawName: string) {
@@ -61,6 +65,14 @@ const getGuestId = () => {
     localStorage.setItem('wikistars_guest_id', guestId);
   }
   return guestId;
+};
+
+const getLocalDateString = () => {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 };
 
 function generateSearchArrays(nombre: string) {
@@ -118,6 +130,13 @@ export default function App() {
   const [profReviews, setProfReviews] = useState<any[]>([]);
   const [newReviewText, setNewReviewText] = useState('');
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
+  const [selectedRating, setSelectedRating] = useState<number | null>(null);
+  const [ratingHover, setRatingHover] = useState<number | null>(null);
+  const [ratingOpportunities, setRatingOpportunities] = useState<number>(() => {
+    const saved = localStorage.getItem('wikistars_rating_opportunities');
+    return saved !== null ? parseInt(saved, 10) : 6;
+  });
+  const [userTodayVotes, setUserTodayVotes] = useState<number[]>([]);
   const [profCrushes, setProfCrushes] = useState<any[]>([]);
   const [newCrushText, setNewCrushText] = useState('');
   const [isSubmittingCrush, setIsSubmittingCrush] = useState(false);
@@ -176,6 +195,18 @@ export default function App() {
   // Modals state
   const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
   const [isNominateModalOpen, setIsNominateModalOpen] = useState(false);
+  
+  // Edit Wiki Modal State
+  const [isEditWikiModalOpen, setIsEditWikiModalOpen] = useState(false);
+  const [editWikiEdad, setEditWikiEdad] = useState('');
+  const [editWikiAltura, setEditWikiAltura] = useState('');
+  const [editWikiPeso, setEditWikiPeso] = useState('');
+  const [editWikiEstadoCivil, setEditWikiEstadoCivil] = useState('');
+  const [editWikiFacultad, setEditWikiFacultad] = useState('');
+  const [editWikiTrayectoria, setEditWikiTrayectoria] = useState('');
+  const [editWikiExigencia, setEditWikiExigencia] = useState('');
+  const [editWikiMetodo, setEditWikiMetodo] = useState('');
+  const [isSubmittingWiki, setIsSubmittingWiki] = useState(false);
 
   // PWA installation state & handlers
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
@@ -378,7 +409,7 @@ export default function App() {
           [selectedProfessorId]: {
             yoTeConozco: yoSnap.exists(),
             fan: fanSnap.exists(),
-            crush: crushSnap.exists()
+            crush: crushSnap.exists() && crushSnap.data()?.votedAt !== undefined
           }
         }));
       } catch (err) {
@@ -396,6 +427,7 @@ export default function App() {
       setProfShips([]);
       setProfReviews([]);
       setUserVotedShipId(null);
+      setUserTodayVotes([]);
       return;
     }
 
@@ -407,7 +439,10 @@ export default function App() {
     const unsubCrushes = onSnapshot(crushesRef, (snapshot) => {
       const list: any[] = [];
       snapshot.forEach((docSnap) => {
-        list.push({ id: docSnap.id, ...docSnap.data() });
+        const data = docSnap.data();
+        if (data.text) {
+          list.push({ id: docSnap.id, ...data });
+        }
       });
       list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
       setProfCrushes(list);
@@ -466,6 +501,74 @@ export default function App() {
       }
     };
     checkShipVote();
+
+    // 5. Load rating opportunities & history today (with smart local storage caching to minimize Firestore reads)
+    const loadRatingData = async () => {
+      const todayStr = getLocalDateString();
+      const cacheKey = `wikistars_votes_${userId}_${selectedProfessorId}_${todayStr}`;
+      const cached = localStorage.getItem(cacheKey);
+
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (parsed && Array.isArray(parsed.votes) && typeof parsed.opportunities === 'number') {
+            setUserTodayVotes(parsed.votes);
+            setRatingOpportunities(parsed.opportunities);
+            return;
+          }
+        } catch (e) {
+          console.warn("Error parsing cached ratings:", e);
+        }
+      }
+
+      // If not cached, fetch ONCE from Firestore
+      try {
+        const userRatingDocRef = doc(db, `centros.educativos/${selectedInstituteId}/profesores/${selectedProfessorId}/ratings`, userId);
+        const userHistoryColRef = collection(db, `centros.educativos/${selectedInstituteId}/profesores/${selectedProfessorId}/ratings/${userId}/history`);
+
+        const [ratingSnap, historySnap] = await Promise.all([
+          getDoc(userRatingDocRef),
+          getDocs(userHistoryColRef)
+        ]);
+
+        let lives = 6;
+        if (ratingSnap.exists()) {
+          const data = ratingSnap.data();
+          if (data.lastVotedDate === todayStr) {
+            lives = typeof data.lives === 'number' ? data.lives : 6;
+          }
+        }
+
+        const docsList = historySnap.docs.map(d => d.data());
+        const todayVotes = docsList
+          .filter(item => {
+            if (!item.createdAt) return false;
+            try {
+              const dateObj = new Date(item.createdAt);
+              const y = dateObj.getFullYear();
+              const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+              const d = String(dateObj.getDate()).padStart(2, '0');
+              return `${y}-${m}-${d}` === todayStr;
+            } catch {
+              return false;
+            }
+          })
+          .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+          .map(item => item.rating);
+
+        setUserTodayVotes(todayVotes);
+        setRatingOpportunities(lives);
+
+        // Save to cache
+        localStorage.setItem(cacheKey, JSON.stringify({ votes: todayVotes, opportunities: lives }));
+      } catch (err) {
+        console.warn("Error fetching rating data from Firestore:", err);
+        setUserTodayVotes([]);
+        setRatingOpportunities(6);
+      }
+    };
+
+    loadRatingData();
 
     return () => {
       unsubCrushes();
@@ -599,13 +702,22 @@ export default function App() {
 
         if (!instDocRef || !instCrushRef) throw new Error("No institute selected");
 
+        const instCrushSnap = await transaction.get(instCrushRef);
+        const hasText = instCrushSnap.exists() && instCrushSnap.data()?.text !== undefined;
+
         if (hasCrush) {
-          // Remove crush
-          transaction.delete(instCrushRef);
+          // Remove crush vote
+          if (hasText) {
+            // Keep text fields, just remove votedAt
+            transaction.update(instCrushRef, { votedAt: deleteField() });
+          } else {
+            // No text, safe to delete entire document
+            transaction.delete(instCrushRef);
+          }
           transaction.set(instDocRef, { crushesCount: increment(-1) }, { merge: true });
         } else {
-          // Add crush
-          transaction.set(instCrushRef, { votedAt: timestamp });
+          // Add crush vote
+          transaction.set(instCrushRef, { votedAt: timestamp }, { merge: true });
           transaction.set(instDocRef, { crushesCount: increment(1) }, { merge: true });
         }
       });
@@ -628,20 +740,35 @@ export default function App() {
 
   const handleSubmitCrush = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedProfessorId || !newCrushText.trim() || isSubmittingCrush) return;
+    if (!selectedProfessorId || !selectedInstituteId || !newCrushText.trim() || isSubmittingCrush) return;
+    const authorId = auth.currentUser?.uid || getGuestId();
+    
+    const alreadyHasCrush = profCrushes.some(c => c.authorId === authorId);
+    if (alreadyHasCrush) {
+      triggerNotice('Ya tienes un mensaje de amor publicado. Elimínalo para poder enviar uno nuevo.');
+      return;
+    }
+
     setIsSubmittingCrush(true);
     try {
-      const authorId = auth.currentUser?.uid || getGuestId();
       const crushId = authorId;
       const text = newCrushText.trim();
       const timestamp = new Date().toISOString();
       const authorName = currentUser ? currentUser.name : 'Estudiante Anónimo';
 
-      await setDoc(doc(db, `perfiles/${selectedProfessorId}/crushes`, crushId), {
-        text,
-        authorName,
-        authorId,
-        createdAt: timestamp
+      await runTransaction(db, async (transaction) => {
+        const perfCrushRef = doc(db, `perfiles/${selectedProfessorId}/crushes`, crushId);
+        const instCrushRef = doc(db, `centros.educativos/${selectedInstituteId}/profesores/${selectedProfessorId}/crushes`, crushId);
+        
+        const data = {
+          text,
+          authorName,
+          authorId,
+          createdAt: timestamp
+        };
+        
+        transaction.set(perfCrushRef, data, { merge: true });
+        transaction.set(instCrushRef, data, { merge: true });
       });
 
       setNewCrushText('');
@@ -655,30 +782,222 @@ export default function App() {
     }
   };
 
-  const handleSubmitReview = async (e: React.FormEvent) => {
+  const handleDeleteCrush = async (crushAuthorId?: string) => {
+    if (!selectedProfessorId || !selectedInstituteId || isSubmittingCrush) return;
+    const userId = auth.currentUser?.uid || getGuestId();
+    const targetId = crushAuthorId || userId;
+    
+    if (targetId !== userId) {
+      triggerNotice('Solo puedes eliminar tu propio mensaje de amor.');
+      return;
+    }
+
+    setIsSubmittingCrush(true);
+    try {
+      await runTransaction(db, async (transaction) => {
+        const instCrushRef = doc(db, `centros.educativos/${selectedInstituteId}/profesores/${selectedProfessorId}/crushes`, targetId);
+        const perfCrushRef = doc(db, `perfiles/${selectedProfessorId}/crushes`, targetId);
+        
+        const instCrushSnap = await transaction.get(instCrushRef);
+        const hasHeartVote = instCrushSnap.exists() && instCrushSnap.data()?.votedAt !== undefined;
+
+        if (hasHeartVote) {
+          // Document still has Heart (❤️) vote, keep votedAt and remove text/comment fields
+          transaction.update(instCrushRef, {
+            text: deleteField(),
+            authorName: deleteField(),
+            authorId: deleteField(),
+            createdAt: deleteField()
+          });
+        } else {
+          // No Heart (❤️) vote exists, safely delete the entire document
+          transaction.delete(instCrushRef);
+        }
+        
+        // Remove from global/feed copy
+        transaction.delete(perfCrushRef);
+      });
+
+      triggerNotice('¡Tu mensaje de amor ha sido eliminado!');
+    } catch (err) {
+      console.error("Error deleting crush:", err);
+      triggerNotice('No se pudo eliminar el mensaje.');
+    } finally {
+      setIsSubmittingCrush(false);
+    }
+  };
+
+  const handleOpenEditWiki = () => {
+    if (!currentSelectedProfessor) return;
+    setEditWikiEdad(currentSelectedProfessor.edad || '');
+    setEditWikiAltura(currentSelectedProfessor.altura || '');
+    setEditWikiPeso(currentSelectedProfessor.peso || '');
+    setEditWikiEstadoCivil(currentSelectedProfessor.estadoCivil || '');
+    setEditWikiFacultad(currentSelectedProfessor.facultad || 'Educación y Ciencias');
+    setEditWikiTrayectoria(currentSelectedProfessor.trayectoria || '10+ Años en Docencia');
+    setEditWikiExigencia(currentSelectedProfessor.exigencia || 'Alto (Valora Esfuerzo)');
+    setEditWikiMetodo(currentSelectedProfessor.metodo || 'Dinámico y Práctico');
+    setIsEditWikiModalOpen(true);
+  };
+
+  const handleSubmitWiki = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedProfessorId || !newReviewText.trim() || isSubmittingReview) return;
+    if (!selectedProfessorId || !selectedInstituteId || isSubmittingWiki) return;
+    setIsSubmittingWiki(true);
+    try {
+      const profDocRef = doc(db, 'centros.educativos', selectedInstituteId, 'profesores', selectedProfessorId);
+      const perfDocRef = doc(db, 'perfiles', selectedProfessorId);
+      
+      const updateData = {
+        edad: editWikiEdad.trim(),
+        altura: editWikiAltura.trim(),
+        peso: editWikiPeso.trim(),
+        estadoCivil: editWikiEstadoCivil.trim(),
+        facultad: editWikiFacultad.trim(),
+        trayectoria: editWikiTrayectoria.trim(),
+        exigencia: editWikiExigencia.trim(),
+        metodo: editWikiMetodo.trim()
+      };
+      
+      await runTransaction(db, async (transaction) => {
+        transaction.set(profDocRef, updateData, { merge: true });
+        transaction.set(perfDocRef, updateData, { merge: true });
+      });
+      
+      setIsEditWikiModalOpen(false);
+      triggerNotice('¡Información de la Wiki actualizada!');
+    } catch (err) {
+      console.error("Error updating wiki:", err);
+      triggerNotice('No se pudo guardar la información de la wiki.');
+    } finally {
+      setIsSubmittingWiki(false);
+    }
+  };
+
+  const handleSubmitReview = async (rating: number) => {
+    if (!selectedProfessorId || !selectedInstituteId || isSubmittingReview) return;
     setIsSubmittingReview(true);
     try {
       const authorId = auth.currentUser?.uid || getGuestId();
-      const reviewId = authorId;
-      const text = newReviewText.trim();
+      const text = `Calificó con ★ ${rating}`;
       const timestamp = new Date().toISOString();
       const authorName = currentUser ? currentUser.name : 'Estudiante Anónimo';
 
-      await setDoc(doc(db, `perfiles/${selectedProfessorId}/reviews`, reviewId), {
-        text,
-        authorName,
-        authorId,
-        createdAt: timestamp
+      const profDocRef = doc(db, 'centros.educativos', selectedInstituteId, 'profesores', selectedProfessorId);
+      const userRatingRef = doc(db, 'centros.educativos', selectedInstituteId, 'profesores', selectedProfessorId, 'ratings', authorId);
+      
+      const historyColRef = collection(db, 'centros.educativos', selectedInstituteId, 'profesores', selectedProfessorId, 'ratings', authorId, 'history');
+      const newHistoryRef = doc(historyColRef);
+      
+      const reviewColRef = collection(db, 'centros.educativos', selectedInstituteId, 'profesores', selectedProfessorId, 'reviews');
+      const newReviewRef = doc(reviewColRef);
+
+      await runTransaction(db, async (transaction) => {
+        const profSnap = await transaction.get(profDocRef);
+        const userRatingSnap = await transaction.get(userRatingRef);
+
+        const todayStr = getLocalDateString();
+        let currentLives = 6;
+        if (userRatingSnap.exists()) {
+          const data = userRatingSnap.data();
+          if (data.lastVotedDate === todayStr) {
+            currentLives = typeof data.lives === 'number' ? data.lives : 6;
+          }
+        }
+
+        if (currentLives <= 0) {
+          throw new Error('¡Ya no te quedan oportunidades de calificación para hoy!');
+        }
+
+        const newLives = currentLives - 1;
+
+        // Calculate stars
+        const profData = profSnap.data() || {};
+        const currentRatingCount = profData.ratingCount || 0;
+        
+        const rating_1_count = profData.rating_1_count || 0;
+        const rating_2_count = profData.rating_2_count || 0;
+        const rating_3_count = profData.rating_3_count || 0;
+        const rating_4_count = profData.rating_4_count || 0;
+        const rating_5_count = profData.rating_5_count || 0;
+
+        let new_1 = rating_1_count;
+        let new_2 = rating_2_count;
+        let new_3 = rating_3_count;
+        let new_4 = rating_4_count;
+        let new_5 = rating_5_count;
+
+        if (rating === 1) new_1++;
+        if (rating === 2) new_2++;
+        if (rating === 3) new_3++;
+        if (rating === 4) new_4++;
+        if (rating === 5) new_5++;
+
+        const newRatingCount = currentRatingCount + 1;
+        const newSum = (new_1 * 1) + (new_2 * 2) + (new_3 * 3) + (new_4 * 4) + (new_5 * 5);
+        const newAverage = parseFloat((newSum / newRatingCount).toFixed(1));
+
+        // Update Professor document
+        transaction.set(profDocRef, {
+          rating: newAverage,
+          ratingCount: newRatingCount,
+          rating_1_count: new_1,
+          rating_2_count: new_2,
+          rating_3_count: new_3,
+          rating_4_count: new_4,
+          rating_5_count: new_5
+        }, { merge: true });
+
+        // Set or update User Rating document
+        transaction.set(userRatingRef, {
+          userId: authorId,
+          lives: newLives,
+          lastVotedDate: todayStr
+        });
+
+        // Add to history
+        transaction.set(newHistoryRef, {
+          rating: rating,
+          text: text,
+          createdAt: timestamp,
+          authorName,
+          authorId
+        });
+
+        // Add to reviews collection for public feed
+        transaction.set(newReviewRef, {
+          text: text,
+          rating: rating,
+          authorName,
+          authorId,
+          createdAt: timestamp
+        });
       });
 
+      // Update local storage and local state cache
+      const todayStr = getLocalDateString();
+      const cacheKey = `wikistars_votes_${authorId}_${selectedProfessorId}_${todayStr}`;
+      
+      const nextVotes = [...userTodayVotes, rating];
+      const nextOpportunities = Math.max(0, ratingOpportunities - 1);
+      
+      setUserTodayVotes(nextVotes);
+      setRatingOpportunities(nextOpportunities);
+      
+      localStorage.setItem(cacheKey, JSON.stringify({ votes: nextVotes, opportunities: nextOpportunities }));
+
       setNewReviewText('');
-      pushSocialLog(`📝 ¡Se publicó una nueva reseña para un docente!`);
-      triggerNotice('¡Reseña publicada con éxito!');
-    } catch (err) {
+      setSelectedRating(rating);
+      setTimeout(() => {
+        setSelectedRating(null);
+      }, 1500);
+
+      pushSocialLog(`📝 ¡Se publicó una nueva calificación de ★ ${rating} para un docente!`);
+      triggerNotice('¡Calificación publicada con éxito!');
+    } catch (err: any) {
       console.error("Error submitting review:", err);
-      triggerNotice('No se pudo enviar la reseña.');
+      const errMsg = err?.message || 'No se pudo enviar la calificación.';
+      triggerNotice(errMsg);
     } finally {
       setIsSubmittingReview(false);
     }
@@ -1786,33 +2105,6 @@ export default function App() {
                             {inst.description}
                           </p>
                         </div>
-
-                        <div className="mt-5 pt-4 border-t border-zinc-900 space-y-2.5">
-                          {/* Location */}
-                          <div className="flex items-center gap-1.5 text-[11px] text-zinc-500 font-mono font-medium">
-                            <MapPin className="w-3.5 h-3.5 shrink-0 text-zinc-500" />
-                            <span className="truncate">{inst.location}</span>
-                          </div>
-
-                          {/* Category popularity detail & Alumnos count */}
-                          <div className="flex items-center justify-between text-[11px] font-mono bg-zinc-900/40 border border-zinc-900/60 p-2.5 rounded-xl">
-                            <div className="flex items-center gap-1.5">
-                              <div className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse glow-yellow-sm" />
-                              <span className="text-zinc-400 font-bold">{inst.popularCategory}</span>
-                            </div>
-                            <span className="text-zinc-500">
-                              <span className="text-white font-black">{inst.studentCount}</span> alumnos
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Footer Link Button */}
-                      <div className="bg-zinc-950 px-5 py-4 border-t border-zinc-900/60 flex items-center justify-between text-xs font-bold tracking-wider font-mono text-zinc-400 group-hover:text-yellow-400 group-hover:bg-yellow-400/5 transition-all">
-                        <span>INGRESAR AL CAMPUS HUB</span>
-                        <div className="w-6 h-6 rounded-full bg-zinc-900 border border-zinc-800 group-hover:bg-yellow-400 group-hover:border-yellow-400 group-hover:text-black transition-all flex items-center justify-center text-zinc-400 text-[10px]">
-                          →
-                        </div>
                       </div>
                     </motion.div>
                   );
@@ -2531,9 +2823,7 @@ export default function App() {
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {filteredProfessorsInCampus.map((prof) => {
-                      const total = (prof.yoTeConozcoCount || 0) + (prof.fanCount || 0);
-                      const ratio = total > 0 ? (prof.fanCount || 0) / total : 0;
-                      const rating = total > 0 ? (3.0 + ratio * 2.0).toFixed(1) : '0.0';
+                      const rating = typeof prof.rating === 'number' ? prof.rating.toFixed(1) : '0.0';
 
                       return (
                         <div
@@ -3078,12 +3368,9 @@ export default function App() {
                   {/* Rating badge overlapping on bottom-right of avatar */}
                   <div className="absolute -bottom-1 -right-1 bg-yellow-400 text-black border-2 border-[#0b0b0c] px-2.5 py-1 rounded-full font-mono font-black text-xs shadow-lg flex items-center gap-0.5 select-none">
                     <span>★</span>
-                    <span>{(() => {
-                      const total = (currentSelectedProfessor.yoTeConozcoCount || 0) + (currentSelectedProfessor.fanCount || 0);
-                      if (total === 0) return '0.0';
-                      const ratio = (currentSelectedProfessor.fanCount || 0) / total;
-                      return (3.0 + ratio * 2.0).toFixed(1);
-                    })()}</span>
+                    <span>{typeof currentSelectedProfessor.rating === 'number' 
+                      ? currentSelectedProfessor.rating.toFixed(1) 
+                      : '0.0'}</span>
                   </div>
                 </div>
 
@@ -3203,102 +3490,264 @@ export default function App() {
                 </div>
 
                 {/* Tab content 1: Reseñas */}
-                {activeProfSubTab === 'Reseñas' && (
-                  <div className="mt-8 max-w-2xl mx-auto text-left space-y-6">
-                    {/* Add Written Review Form */}
-                    <form onSubmit={handleSubmitReview} className="bg-[#121214]/60 border border-zinc-900 rounded-2xl p-6 space-y-4">
-                      <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
-                        <div className="flex items-center gap-2">
-                          <Star className="w-4 h-4 text-yellow-400 fill-current" />
-                          <h3 className="font-display font-black text-sm text-white uppercase tracking-wider">Escribir una Reseña sobre {currentSelectedProfessor.name}</h3>
-                        </div>
-                        <span className="text-[9px] font-mono bg-yellow-400/10 text-yellow-400 border border-yellow-400/20 px-2.5 py-1 rounded-full uppercase font-black">
-                          COMPARTIR EXPERIENCIA
-                        </span>
-                      </div>
-                      <textarea
-                        value={newReviewText}
-                        onChange={(e) => setNewReviewText(e.target.value)}
-                        placeholder="Comparte cómo es su clase, su método de evaluación o consejos útiles para futuros alumnos..."
-                        maxLength={350}
-                        rows={4}
-                        className="w-full bg-black border border-zinc-900 rounded-xl p-4 text-xs font-sans text-zinc-100 placeholder-zinc-650 focus:outline-none focus:border-yellow-400/40 resize-none transition-all duration-300"
-                        required
-                      />
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-mono text-zinc-550">
-                          {350 - newReviewText.length} caracteres restantes
-                        </span>
-                        <button
-                          type="submit"
-                          disabled={isSubmittingReview || !newReviewText.trim()}
-                          className="bg-yellow-400 hover:bg-yellow-350 disabled:opacity-40 text-black font-mono font-black text-xs px-5 py-2.5 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all duration-300 uppercase shadow-md shadow-yellow-400/15"
-                        >
-                          <Send className="w-3.5 h-3.5 text-black" />
-                          <span>Enviar Reseña</span>
-                        </button>
-                      </div>
-                    </form>
+                {activeProfSubTab === 'Reseñas' && (() => {
+                  const ratedReviews = profReviews.filter(r => typeof r.rating === 'number');
+                  
+                  let totalVotes = typeof currentSelectedProfessor.ratingCount === 'number' 
+                    ? currentSelectedProfessor.ratingCount 
+                    : 0;
+                  
+                  let averageRating = typeof currentSelectedProfessor.rating === 'number' 
+                    ? currentSelectedProfessor.rating.toFixed(1) 
+                    : "0.0";
 
-                    {/* Written Reviews Feed */}
-                    <div className="space-y-3">
-                      <h4 className="text-[10px] tracking-widest font-mono font-black text-zinc-500 uppercase">Reseñas del Campus ({profReviews.length})</h4>
-                      {profReviews.length === 0 ? (
-                        <div className="bg-[#121214]/30 border border-zinc-900/40 p-8 rounded-2xl text-center space-y-1.5">
-                          <Star className="w-5 h-5 text-zinc-600 mx-auto" />
-                          <p className="text-xs text-zinc-550 font-mono italic">Aún no hay reseñas escritas para este docente. ¡Aporta tu opinión para orientar a la comunidad!</p>
-                        </div>
-                      ) : (
-                        <div className="grid grid-cols-1 gap-3">
-                          {profReviews.map((review) => (
-                            <div key={review.id} className="bg-gradient-to-br from-[#0c0c0e] to-black border border-zinc-900 p-5 rounded-2xl relative overflow-hidden group hover:border-yellow-400/10 transition-colors">
-                              <div className="absolute top-0 right-0 w-24 h-24 bg-yellow-400/2 rounded-full blur-2xl group-hover:bg-yellow-400/5 transition-all" />
-                              <div className="flex items-start justify-between gap-4">
-                                <div className="space-y-2">
-                                  <p className="text-xs text-zinc-300 leading-relaxed font-sans font-medium">
-                                    "{review.text}"
-                                  </p>
-                                  <div className="flex items-center gap-2 text-[9px] font-mono text-zinc-550">
-                                    <span className="text-yellow-400">★</span>
-                                    <span className="font-bold text-zinc-400">{review.authorName || 'Anónimo'}</span>
-                                    <span>•</span>
-                                    <span>{new Date(review.createdAt || Date.now()).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
-                                  </div>
-                                </div>
-                                <span className="text-lg shrink-0 select-none">📝</span>
-                              </div>
+                  let starDistribution: Record<number, number> = {
+                    5: currentSelectedProfessor.rating_5_count || 0,
+                    4: currentSelectedProfessor.rating_4_count || 0,
+                    3: currentSelectedProfessor.rating_3_count || 0,
+                    2: currentSelectedProfessor.rating_2_count || 0,
+                    1: currentSelectedProfessor.rating_1_count || 0,
+                  };
+
+                  // Fallback for backward compatibility
+                  if (totalVotes === 0 && ratedReviews.length > 0) {
+                    totalVotes = ratedReviews.length;
+                    averageRating = (ratedReviews.reduce((sum, r) => sum + r.rating, 0) / totalVotes).toFixed(1);
+                    ratedReviews.forEach(r => {
+                      const rVal = Math.round(r.rating);
+                      if (rVal >= 1 && rVal <= 5) {
+                        starDistribution[rVal]++;
+                      }
+                    });
+                  }
+
+                  return (
+                    <div className="mt-8 max-w-2xl mx-auto text-left space-y-6">
+                      
+                      {/* Resumen de Estrellas */}
+                      <div className="space-y-4">
+                        <h3 className="font-display font-black text-lg text-white tracking-tight uppercase">Resumen de Estrellas</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                          {/* Left Panel */}
+                          <div className="bg-[#121214]/60 border border-zinc-900 rounded-2xl p-6 flex flex-col items-center justify-center text-center">
+                            <span className="text-4xl md:text-5xl font-display font-black text-yellow-400 mb-2">
+                              {averageRating}
+                            </span>
+                            <div className="flex gap-1 mb-3">
+                              {[1, 2, 3, 4, 5].map((starVal) => {
+                                const numericAvg = parseFloat(averageRating);
+                                const isFilled = starVal <= Math.round(numericAvg);
+                                return (
+                                  <Star 
+                                    key={starVal} 
+                                    className={`w-4 h-4 ${isFilled ? 'text-yellow-400 fill-current' : 'text-zinc-700'}`} 
+                                  />
+                                );
+                              })}
                             </div>
-                          ))}
+                            <span className="text-[10px] tracking-widest font-mono font-black text-zinc-500 uppercase select-none">
+                              {totalVotes} {totalVotes === 1 ? 'VOTO TOTAL' : 'VOTOS TOTALES'}
+                            </span>
+                          </div>
+
+                          {/* Right Panel */}
+                          <div className="md:col-span-2 bg-[#121214]/30 border border-[#18181b]/30 rounded-2xl p-6 flex flex-col justify-center space-y-3">
+                            {[5, 4, 3, 2, 1].map((starNum) => {
+                              const count = starDistribution[starNum] || 0;
+                              const percent = totalVotes > 0 ? (count / totalVotes) * 100 : 0;
+                              return (
+                                <div key={starNum} className="flex items-center gap-3">
+                                  <span className="text-xs font-mono font-bold text-zinc-400 w-3 text-right">
+                                    {starNum}
+                                  </span>
+                                  <div className="flex-1 h-2 bg-zinc-900 rounded-full overflow-hidden border border-zinc-900/40">
+                                    <div 
+                                      className="h-full bg-yellow-400 rounded-full transition-all duration-500"
+                                      style={{ width: `${percent}%` }}
+                                    />
+                                  </div>
+                                  <span className="text-xs font-mono text-zinc-500 w-6 text-right">
+                                    {count}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
-                      )}
+                      </div>
+
+                      {/* Califica y gana rachas */}
+                      <div className="bg-[#121214]/60 border border-zinc-900 rounded-2xl p-6 space-y-6">
+                        <div className="flex items-center gap-4 border-b border-zinc-900/60 pb-4">
+                          <div className="w-10 h-10 rounded-xl bg-yellow-500/10 border border-yellow-500/20 flex items-center justify-center shrink-0">
+                            <Flame className="w-5 h-5 text-yellow-500 fill-current" />
+                          </div>
+                          <div>
+                            <h3 className="font-display font-black text-sm text-white uppercase tracking-wider">
+                              ¡CALIFICA Y GANA RACHAS!
+                            </h3>
+                            <p className="text-[9px] font-mono text-zinc-500 uppercase tracking-wider">
+                              CADA VOTO CUENTA PARA EL RANKING
+                            </p>
+                          </div>
+                        </div>
+                        
+                        <div className="flex flex-col items-center justify-center py-2 space-y-4">
+                          {/* Oportunidades badge */}
+                          <div className="bg-zinc-950/80 border border-zinc-900 px-4 py-1.5 rounded-full flex items-center gap-1.5">
+                            <span className="text-yellow-400 text-xs">⚡</span>
+                            <span className="text-[10px] tracking-widest font-mono font-black text-zinc-400 uppercase">
+                              OPORTUNIDADES: {ratingOpportunities}/6
+                            </span>
+                          </div>
+
+                          <h4 className="text-[10px] tracking-widest font-mono font-black text-zinc-400 uppercase select-none pt-2">
+                            ¿QUÉ PUNTUACIÓN LE DAS?
+                          </h4>
+
+                          {/* 5 Big Stars */}
+                          <div className="flex items-center gap-2">
+                            {[1, 2, 3, 4, 5].map((starVal) => {
+                              const isLit = (ratingHover !== null ? starVal <= ratingHover : (selectedRating !== null ? starVal <= selectedRating : false));
+                              return (
+                                <button
+                                  key={starVal}
+                                  type="button"
+                                  onMouseEnter={() => setRatingHover(starVal)}
+                                  onMouseLeave={() => setRatingHover(null)}
+                                  onClick={() => handleSubmitReview(starVal)}
+                                  disabled={ratingOpportunities === 0 || isSubmittingReview}
+                                  className="p-1.5 focus:outline-none disabled:opacity-30 disabled:cursor-not-allowed group transition-transform hover:scale-110 active:scale-95 cursor-pointer"
+                                >
+                                  <Star 
+                                    className={`w-9 h-9 transition-all duration-200 ${
+                                      isLit 
+                                        ? 'text-yellow-400 fill-current drop-shadow-[0_0_8px_rgba(250,204,21,0.25)]' 
+                                        : 'text-zinc-700 hover:text-zinc-600'
+                                    }`}
+                                  />
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                          {/* Tus Votos de Hoy */}
+                          <div className="pt-4 flex flex-col items-center space-y-3">
+                            <div className="flex items-center gap-1.5 text-zinc-550 select-none">
+                              <History className="w-3.5 h-3.5" />
+                              <span className="text-[10px] tracking-widest font-mono font-black uppercase">
+                                Tus votos de hoy
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {Array.from({ length: 6 }).map((_, idx) => {
+                                const hasVote = idx < userTodayVotes.length;
+                                const ratingValue = hasVote ? userTodayVotes[idx] : null;
+
+                                return (
+                                  <div
+                                    key={idx}
+                                    className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 ${
+                                      hasVote
+                                        ? 'bg-yellow-400/10 border border-yellow-400/30 shadow-[0_0_8px_rgba(250,204,21,0.08)]'
+                                        : 'bg-zinc-950/40 border border-dashed border-zinc-800/80'
+                                    }`}
+                                  >
+                                    {hasVote ? (
+                                      <span className="text-sm font-mono font-black text-yellow-400">
+                                        {ratingValue}
+                                      </span>
+                                    ) : (
+                                      <span className="text-[11px] text-zinc-700 font-bold select-none">
+                                        ⚡
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {/* Tab content 2: Wiki */}
                 {activeProfSubTab === 'Wiki' && (
                   <div className="mt-8 max-w-2xl mx-auto text-left space-y-6">
                     <div className="bg-[#121214]/60 border border-zinc-900 rounded-2xl p-6 space-y-4">
-                      <div className="flex items-center gap-2 border-b border-zinc-900 pb-3">
-                        <BookOpen className="w-4 h-4 text-yellow-400" />
-                        <h3 className="font-display font-black text-sm text-white uppercase tracking-wider">INFORMACIÓN GENERAL Y TRAYECTORIA</h3>
+                      <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
+                        <div className="flex items-center gap-2">
+                          <BookOpen className="w-4 h-4 text-yellow-400" />
+                          <h3 className="font-display font-black text-sm text-white uppercase tracking-wider">INFORMACIÓN GENERAL Y TRAYECTORIA</h3>
+                        </div>
+                        <button
+                          onClick={handleOpenEditWiki}
+                          className="px-3 py-1.5 bg-zinc-900/80 hover:bg-yellow-400/15 text-zinc-400 hover:text-yellow-400 border border-zinc-800 hover:border-yellow-400/20 rounded-xl text-xs font-mono font-black uppercase transition-all duration-300 cursor-pointer flex items-center gap-1.5"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                          <span>Editar Wiki</span>
+                        </button>
                       </div>
                       <div className="grid grid-cols-2 gap-4 text-xs font-mono">
                         <div>
                           <span className="text-zinc-500 block uppercase text-[10px]">FACULTAD / CENTRO</span>
-                          <span className="text-zinc-200 uppercase font-black">Educación y Ciencias</span>
+                          <span className="text-zinc-200 uppercase font-black">
+                            {currentSelectedProfessor.facultad || 'Educación y Ciencias'}
+                          </span>
                         </div>
                         <div>
                           <span className="text-zinc-500 block uppercase text-[10px]">TRAYECTORIA ACADÉMICA</span>
-                          <span className="text-zinc-200 uppercase font-black">10+ Años en Docencia</span>
+                          <span className="text-zinc-200 uppercase font-black">
+                            {currentSelectedProfessor.trayectoria || '10+ Años en Docencia'}
+                          </span>
                         </div>
                         <div>
                           <span className="text-zinc-500 block uppercase text-[10px]">NIVEL DE EXIGENCIA</span>
-                          <span className="text-yellow-400 uppercase font-black">Alto (Valora Esfuerzo)</span>
+                          <span className="text-yellow-400 uppercase font-black">
+                            {currentSelectedProfessor.exigencia || 'Alto (Valora Esfuerzo)'}
+                          </span>
                         </div>
                         <div>
                           <span className="text-zinc-500 block uppercase text-[10px]">MÉTODO DE ENSEÑANZA</span>
-                          <span className="text-zinc-200 uppercase font-black">Dinámico y Práctico</span>
+                          <span className="text-zinc-200 uppercase font-black">
+                            {currentSelectedProfessor.metodo || 'Dinámico y Práctico'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Biografia / Datos Personales */}
+                    <div className="bg-[#121214]/60 border border-zinc-900 rounded-2xl p-6 space-y-4">
+                      <div className="flex items-center gap-2 border-b border-zinc-900 pb-3">
+                        <User className="w-4 h-4 text-yellow-400" />
+                        <h3 className="font-display font-black text-sm text-white uppercase tracking-wider">DATOS BIOGRÁFICOS (WIKI)</h3>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4 text-xs font-mono">
+                        <div>
+                          <span className="text-zinc-500 block uppercase text-[10px]">EDAD</span>
+                          <span className="text-zinc-200 uppercase font-black">
+                            {currentSelectedProfessor.edad || 'No especificada'}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-zinc-500 block uppercase text-[10px]">ALTURA</span>
+                          <span className="text-zinc-200 uppercase font-black">
+                            {currentSelectedProfessor.altura || 'No especificada'}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-zinc-500 block uppercase text-[10px]">PESO</span>
+                          <span className="text-zinc-200 uppercase font-black">
+                            {currentSelectedProfessor.peso || 'No especificado'}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-zinc-500 block uppercase text-[10px]">ESTADO CIVIL</span>
+                          <span className="text-zinc-200 uppercase font-black">
+                            {currentSelectedProfessor.estadoCivil || 'No especificado'}
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -3327,167 +3776,175 @@ export default function App() {
                 )}
 
                 {/* Tab content 3: Crushes */}
-                {activeProfSubTab === 'Crushes' && (
-                  <div className="mt-8 max-w-2xl mx-auto text-left space-y-6">
-                    {/* Crush Voting Toggle */}
-                    {(() => {
-                      const hasCrush = (userVotes[currentSelectedProfessor.id] || { crush: false }).crush;
-                      return (
-                        <div className="bg-[#121214]/60 border border-zinc-900 rounded-2xl p-8 text-center space-y-4">
-                          <h3 className="font-display font-black text-lg text-white">¿ES TU AMOR SECRETO?</h3>
-                          <button
-                            onClick={() => handleToggleCrush(currentSelectedProfessor.id)}
-                            disabled={isVotingProf}
-                            className={`mx-auto p-4 rounded-full transition-all duration-300 ${hasCrush ? 'bg-pink-500/20' : 'bg-zinc-900'}`}
-                          >
-                            <Heart className={`w-12 h-12 ${hasCrush ? 'text-pink-500 fill-current' : 'text-zinc-600'}`} />
-                          </button>
-                          <p className="text-sm text-zinc-400 font-mono">
-                            {hasCrush ? '¡Le has dado un crush!' : '¿Sientes una conexión especial?'}
-                          </p>
-                          <div className="text-center">
-                            <span className="text-3xl font-display font-black block text-white">
-                              {currentSelectedProfessor.crushesCount || 0}
-                            </span>
-                            <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-500">
-                              CRUSHES TOTALES
+                {activeProfSubTab === 'Crushes' && (() => {
+                  const userId = auth.currentUser?.uid || getGuestId();
+                  const myCrush = profCrushes.find(c => c.authorId === userId);
+                  return (
+                    <div className="mt-8 max-w-2xl mx-auto text-left space-y-6">
+                      {/* Crush Voting Toggle */}
+                      {(() => {
+                        const hasCrush = (userVotes[currentSelectedProfessor.id] || { crush: false }).crush;
+                        return (
+                          <div className="bg-[#121214]/60 border border-zinc-900 rounded-2xl p-8 text-center space-y-4">
+                            <h3 className="font-display font-black text-lg text-white">¿ES TU AMOR SECRETO?</h3>
+                            <button
+                              onClick={() => handleToggleCrush(currentSelectedProfessor.id)}
+                              disabled={isVotingProf}
+                              className={`mx-auto p-4 rounded-full transition-all duration-300 ${hasCrush ? 'bg-pink-500/20' : 'bg-zinc-900'}`}
+                            >
+                              <Heart className={`w-12 h-12 ${hasCrush ? 'text-pink-500 fill-current' : 'text-zinc-600'}`} />
+                            </button>
+                            <p className="text-sm text-zinc-400 font-mono">
+                              {hasCrush ? '¡Le has dado un crush!' : '¿Sientes una conexión especial?'}
+                            </p>
+                            <div className="text-center">
+                              <span className="text-3xl font-display font-black block text-white">
+                                {currentSelectedProfessor.crushesCount || 0}
+                              </span>
+                              <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-500">
+                                CRUSHES TOTALES
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* Add Crush Form / Active Crush Display */}
+                      {myCrush ? (
+                        <div className="bg-[#121214]/60 border border-zinc-900 rounded-2xl p-6 space-y-4">
+                          <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
+                            <div className="flex items-center gap-2">
+                              <Heart className="w-4 h-4 text-red-500 fill-current animate-pulse" />
+                              <h3 className="font-display font-black text-sm text-white uppercase tracking-wider">TU CONFESIÓN ACTIVA</h3>
+                            </div>
+                            <span className="text-[9px] font-mono bg-pink-500/10 text-pink-400 border border-pink-500/20 px-2.5 py-1 rounded-full uppercase font-black animate-pulse">
+                              PUBLICADO EN EL MURO
                             </span>
                           </div>
-                        </div>
-                      );
-                    })()}
+                          
+                          <div className="bg-gradient-to-br from-[#120a10]/40 to-black border border-pink-500/10 p-5 rounded-xl relative overflow-hidden">
+                            <div className="absolute top-0 right-0 w-24 h-24 bg-pink-500/5 rounded-full blur-2xl" />
+                            <p className="text-xs text-pink-100 leading-relaxed font-sans italic font-medium">
+                              "{myCrush.text}"
+                            </p>
+                            <div className="flex items-center gap-2 text-[10px] font-mono text-zinc-500 mt-2">
+                              <span>Publicado como:</span>
+                              <span className="text-zinc-300 font-bold">{myCrush.authorName || 'Anónimo'}</span>
+                              <span className="text-pink-500/80 font-bold lowercase">(tu mensaje)</span>
+                            </div>
+                          </div>
 
-                    {/* Add Crush Form */}
-                    <form onSubmit={handleSubmitCrush} className="bg-[#121214]/60 border border-zinc-900 rounded-2xl p-6 space-y-4">
-                      <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
-                        <div className="flex items-center gap-2">
-                          <Heart className="w-4 h-4 text-red-500 fill-current" />
-                          <h3 className="font-display font-black text-sm text-white uppercase tracking-wider">CONFESAR UN CRUSH ANÓNIMO</h3>
-                        </div>
-                        <span className="text-[9px] font-mono bg-red-500/10 text-red-400 border border-red-500/20 px-2.5 py-1 rounded-full uppercase font-black">
-                          100% CONFIDENCIAL
-                        </span>
-                      </div>
-                      <textarea
-                        value={newCrushText}
-                        onChange={(e) => setNewCrushText(e.target.value)}
-                        placeholder="Escribe algo lindo sobre este docente (ej: 'Me encanta su paciencia al explicar' o 'Su estilo de vestir es impecable')..."
-                        maxLength={180}
-                        rows={3}
-                        className="w-full bg-black border border-zinc-900 rounded-xl p-4 text-xs font-sans text-zinc-100 placeholder-zinc-650 focus:outline-none focus:border-red-500/40 resize-none transition-all duration-300"
-                        required
-                      />
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-mono text-zinc-550">
-                          {180 - newCrushText.length} caracteres restantes
-                        </span>
-                        <button
-                          type="submit"
-                          disabled={isSubmittingCrush || !newCrushText.trim()}
-                          className="bg-red-500 hover:bg-red-400 disabled:opacity-40 text-white font-mono font-black text-xs px-5 py-2.5 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all duration-300 uppercase shadow-md shadow-red-500/15"
-                        >
-                          <Send className="w-3.5 h-3.5 text-white" />
-                          <span>Enviar Crush</span>
-                        </button>
-                      </div>
-                    </form>
-
-                    {/* Crushes Feed */}
-                    <div className="space-y-3">
-                      <h4 className="text-[10px] tracking-widest font-mono font-black text-zinc-500 uppercase">Muro de Afecto Estudiantil ({profCrushes.length})</h4>
-                      {profCrushes.length === 0 ? (
-                        <div className="bg-[#121214]/30 border border-zinc-900/40 p-8 rounded-2xl text-center space-y-1.5">
-                          <Heart className="w-5 h-5 text-zinc-600 mx-auto" />
-                          <p className="text-xs text-zinc-550 font-mono italic">Aún no hay mensajes de crush en el muro. ¡Sé el primero en confesar algo lindo!</p>
+                          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
+                            <span className="text-[10px] font-mono text-zinc-500">
+                              Para escribir una confesión diferente, primero debes eliminar tu mensaje actual.
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteCrush(myCrush.id)}
+                              disabled={isSubmittingCrush}
+                              className="w-full sm:w-auto bg-zinc-900/80 hover:bg-red-950/40 hover:text-red-400 text-zinc-400 border border-zinc-800 hover:border-red-500/20 font-mono font-bold text-xs px-5 py-2.5 rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all duration-300 uppercase shrink-0"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Eliminar confesión</span>
+                            </button>
+                          </div>
                         </div>
                       ) : (
-                        <div className="grid grid-cols-1 gap-3">
-                          {profCrushes.map((crush) => (
-                            <div key={crush.id} className="bg-gradient-to-br from-[#0c0c0e] to-black border border-zinc-900 p-5 rounded-2xl relative overflow-hidden group hover:border-red-500/10 transition-colors">
-                              <div className="absolute top-0 right-0 w-24 h-24 bg-red-500/2 rounded-full blur-2xl group-hover:bg-red-500/5 transition-all" />
-                              <div className="flex items-start justify-between gap-4">
-                                <div className="space-y-2">
-                                  <p className="text-xs text-zinc-300 leading-relaxed font-sans italic font-medium">
-                                    "{crush.text}"
-                                  </p>
-                                  <div className="flex items-center gap-2 text-[9px] font-mono text-zinc-500">
-                                    <span className="text-red-400">♥</span>
-                                    <span>{crush.authorName || 'Anónimo'}</span>
-                                    <span>•</span>
-                                    <span>{new Date(crush.createdAt || Date.now()).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}</span>
+                        <form onSubmit={handleSubmitCrush} className="bg-[#121214]/60 border border-zinc-900 rounded-2xl p-6 space-y-4">
+                          <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
+                            <div className="flex items-center gap-2">
+                              <Heart className="w-4 h-4 text-red-500 fill-current" />
+                              <h3 className="font-display font-black text-sm text-white uppercase tracking-wider">CONFESAR UN CRUSH ANÓNIMO</h3>
+                            </div>
+                            <span className="text-[9px] font-mono bg-red-500/10 text-red-400 border border-red-500/20 px-2.5 py-1 rounded-full uppercase font-black">
+                              100% CONFIDENCIAL
+                            </span>
+                          </div>
+                          <textarea
+                            value={newCrushText}
+                            onChange={(e) => setNewCrushText(e.target.value)}
+                            placeholder="Escribe algo lindo sobre este docente (ej: 'Me encanta su paciencia al explicar' o 'Su estilo de vestir es impecable')..."
+                            maxLength={180}
+                            rows={3}
+                            className="w-full bg-black border border-zinc-900 rounded-xl p-4 text-xs font-sans text-zinc-100 placeholder-zinc-650 focus:outline-none focus:border-red-500/40 resize-none transition-all duration-300"
+                            required
+                          />
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-mono text-zinc-550">
+                              {180 - newCrushText.length} caracteres restantes
+                            </span>
+                            <button
+                              type="submit"
+                              disabled={isSubmittingCrush || !newCrushText.trim()}
+                              className="bg-red-500 hover:bg-red-400 disabled:opacity-40 text-white font-mono font-black text-xs px-5 py-2.5 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all duration-300 uppercase shadow-md shadow-red-500/15"
+                            >
+                              <Send className="w-3.5 h-3.5 text-white" />
+                              <span>Enviar Crush</span>
+                            </button>
+                          </div>
+                        </form>
+                      )}
+
+                      {/* Crushes Feed */}
+                      <div className="space-y-3">
+                        <h4 className="text-[10px] tracking-widest font-mono font-black text-zinc-500 uppercase">Muro de Afecto Estudiantil ({profCrushes.length})</h4>
+                        {profCrushes.length === 0 ? (
+                          <div className="bg-[#121214]/30 border border-zinc-900/40 p-8 rounded-2xl text-center space-y-1.5">
+                            <Heart className="w-5 h-5 text-zinc-600 mx-auto" />
+                            <p className="text-xs text-zinc-550 font-mono italic">Aún no hay mensajes de crush en el muro. ¡Sé el primero en confesar algo lindo!</p>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 gap-3">
+                            {profCrushes.map((crush) => {
+                              const isMyCrushItem = crush.authorId === userId;
+                              return (
+                                <div key={crush.id} className="bg-gradient-to-br from-[#0c0c0e] to-black border border-zinc-900 p-5 rounded-2xl relative overflow-hidden group hover:border-red-500/10 transition-colors">
+                                  <div className="absolute top-0 right-0 w-24 h-24 bg-red-500/2 rounded-full blur-2xl group-hover:bg-red-500/5 transition-all" />
+                                  <div className="flex items-start justify-between gap-4 relative z-10">
+                                    <div className="space-y-2">
+                                      <p className="text-xs text-zinc-300 leading-relaxed font-sans italic font-medium">
+                                        "{crush.text}"
+                                      </p>
+                                      <div className="flex items-center gap-2 text-[9px] font-mono text-zinc-500">
+                                        <span className="text-red-400">♥</span>
+                                        <span>
+                                          {crush.authorName || 'Anónimo'}
+                                          {isMyCrushItem && (
+                                            <span className="text-pink-500/80 font-bold font-sans text-[8px] tracking-normal lowercase ml-1.5">(tu mensaje)</span>
+                                          )}
+                                        </span>
+                                        <span>•</span>
+                                        <span>{new Date(crush.createdAt || Date.now()).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}</span>
+                                      </div>
+                                    </div>
+                                    
+                                    <div className="flex items-center gap-2 shrink-0 self-center">
+                                      {isMyCrushItem && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDeleteCrush(crush.id)}
+                                          disabled={isSubmittingCrush}
+                                          className="p-1.5 text-zinc-500 hover:text-red-400 bg-zinc-950/50 hover:bg-red-950/20 border border-zinc-900 hover:border-red-500/20 rounded-lg transition-all duration-300 cursor-pointer"
+                                          title="Eliminar mi mensaje"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      )}
+                                      <span className="text-lg shrink-0 select-none">💌</span>
+                                    </div>
                                   </div>
                                 </div>
-                                <span className="text-lg shrink-0 select-none">💌</span>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {/* Tab content 4: Ship */}
-                {activeProfSubTab === 'Ship' && (
-                  <div className="mt-8 max-w-2xl mx-auto text-left space-y-6">
-                    <div className="bg-[#121214]/60 border border-zinc-900 rounded-2xl p-6 space-y-4">
-                      <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
-                        <div className="flex items-center gap-2">
-                          <Flame className="w-4 h-4 text-orange-400" />
-                          <h3 className="font-display font-black text-sm text-white uppercase tracking-wider">SHIPS Y EMPAREJAMIENTOS DIVERTIDOS</h3>
-                        </div>
-                        <span className="text-[9px] font-mono bg-orange-400/10 text-orange-400 border border-orange-400/20 px-2.5 py-1 rounded-full uppercase font-black">
-                          {userVotedShipId ? 'VOTO REGISTRADO' : 'SELECCIÓN DIVERTIDA'}
-                        </span>
-                      </div>
-                      <p className="text-xs text-zinc-400 font-sans leading-relaxed">
-                        Los "ships" son combinaciones ficticias o divertidas que los estudiantes asocian con este docente. ¡Vota por tu combinación favorita en el campus!
-                      </p>
-
-                      <div className="space-y-4 pt-2">
-                        {(() => {
-                          const maxVotes = Math.max(...profShips.map(s => s.votes || 1), 1);
-                          return profShips.map((ship) => {
-                            const isThisVoted = userVotedShipId === ship.id;
-                            const voteCount = ship.votes || 0;
-                            const percent = Math.min(100, Math.round((voteCount / maxVotes) * 100));
-                            
-                            return (
-                              <div key={ship.id} className="space-y-2">
-                                <div className="flex items-center justify-between gap-4">
-                                  <span className="text-xs font-mono font-black text-zinc-200 uppercase">{ship.label}</span>
-                                  <div className="flex items-center gap-3">
-                                    <span className="text-xs font-mono font-black text-yellow-400">{voteCount} votos</span>
-                                    <button
-                                      disabled={!!userVotedShipId}
-                                      onClick={() => handleVoteShip(ship.id)}
-                                      className={`px-3 py-1 rounded text-[10px] font-mono font-black uppercase transition-all duration-300 ${
-                                        isThisVoted
-                                          ? 'bg-orange-500 text-white border border-orange-600'
-                                          : userVotedShipId
-                                            ? 'bg-zinc-900 text-zinc-650 border border-zinc-900 cursor-not-allowed'
-                                            : 'bg-zinc-900 hover:bg-orange-500/10 hover:text-orange-400 text-zinc-400 border border-zinc-800 cursor-pointer'
-                                      }`}
-                                    >
-                                      {isThisVoted ? '✓ Mi Voto' : 'Votar'}
-                                    </button>
-                                  </div>
-                                </div>
-                                {/* Bar */}
-                                <div className="h-2 bg-black rounded-full overflow-hidden border border-zinc-900">
-                                  <div 
-                                    className={`h-full rounded-full transition-all duration-500 ${isThisVoted ? 'bg-orange-500' : 'bg-yellow-400'}`}
-                                    style={{ width: `${percent}%` }}
-                                  />
-                                </div>
-                              </div>
-                            );
-                          });
-                        })()}
-                      </div>
-                    </div>
-                  </div>
-                )}
+                {activeProfSubTab === 'Ship' && null}
 
               </div>
 
@@ -4106,6 +4563,160 @@ export default function App() {
                     className="w-full bg-yellow-400 hover:bg-yellow-350 disabled:bg-zinc-850 disabled:text-zinc-500 text-black font-mono font-black text-xs py-3.5 rounded-xl transition-all duration-300 uppercase tracking-widest cursor-pointer shadow-lg shadow-yellow-400/10 hover:-translate-y-0.5 active:translate-y-0"
                   >
                     {isSubmittingProf ? 'Guardando...' : 'Guardar Profesor'}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* --- MODAL: EDITAR WIKI --- */}
+      <AnimatePresence>
+        {isEditWikiModalOpen && (
+          <div id="edit-wiki-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            {/* Backdrop */}
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/90 backdrop-blur-sm shadow-2xl"
+              onClick={() => setIsEditWikiModalOpen(false)}
+            />
+            {/* Box */}
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-[#0b0b0c] border border-zinc-900 rounded-3xl p-6 sm:p-8 max-w-xl w-full relative z-10 space-y-6 shadow-2xl max-h-[90vh] overflow-y-auto"
+            >
+              <button 
+                type="button"
+                onClick={() => setIsEditWikiModalOpen(false)}
+                className="absolute top-4 right-4 text-zinc-500 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="text-center">
+                <h3 className="text-xl font-display font-black text-white uppercase tracking-tight flex items-center justify-center gap-2">
+                  <Edit className="w-5 h-5 text-yellow-400" />
+                  Editar Wiki del Docente
+                </h3>
+                <p className="text-xs text-zinc-400 mt-1 font-sans font-medium">
+                  Cualquier estudiante puede editar esta información. ¡Mantengamos la wiki actualizada!
+                </p>
+              </div>
+
+              <form onSubmit={handleSubmitWiki} className="space-y-4 pt-2">
+                <div className="border-b border-zinc-900 pb-2 mb-2">
+                  <h4 className="text-[10px] font-mono font-black uppercase text-yellow-400 tracking-wider">Información General</h4>
+                </div>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-black block">Facultad / Centro</label>
+                    <input
+                      type="text"
+                      value={editWikiFacultad}
+                      onChange={(e) => setEditWikiFacultad(e.target.value)}
+                      placeholder="Ej. Educación y Ciencias"
+                      className="w-full bg-[#0d0d0d] focus:bg-[#121212] border border-zinc-900 focus:border-yellow-400 text-xs p-3.5 rounded-xl text-zinc-100 outline-none transition-all duration-200 font-sans font-medium placeholder-zinc-700"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-black block">Trayectoria Académica</label>
+                    <input
+                      type="text"
+                      value={editWikiTrayectoria}
+                      onChange={(e) => setEditWikiTrayectoria(e.target.value)}
+                      placeholder="Ej. 10+ Años en Docencia"
+                      className="w-full bg-[#0d0d0d] focus:bg-[#121212] border border-zinc-900 focus:border-yellow-400 text-xs p-3.5 rounded-xl text-zinc-100 outline-none transition-all duration-200 font-sans font-medium placeholder-zinc-700"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-black block">Nivel de Exigencia</label>
+                    <input
+                      type="text"
+                      value={editWikiExigencia}
+                      onChange={(e) => setEditWikiExigencia(e.target.value)}
+                      placeholder="Ej. Alto (Valora Esfuerzo)"
+                      className="w-full bg-[#0d0d0d] focus:bg-[#121212] border border-zinc-900 focus:border-yellow-400 text-xs p-3.5 rounded-xl text-zinc-100 outline-none transition-all duration-200 font-sans font-medium placeholder-zinc-700"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-black block">Método de Enseñanza</label>
+                    <input
+                      type="text"
+                      value={editWikiMetodo}
+                      onChange={(e) => setEditWikiMetodo(e.target.value)}
+                      placeholder="Ej. Dinámico y Práctico"
+                      className="w-full bg-[#0d0d0d] focus:bg-[#121212] border border-zinc-900 focus:border-yellow-400 text-xs p-3.5 rounded-xl text-zinc-100 outline-none transition-all duration-200 font-sans font-medium placeholder-zinc-700"
+                    />
+                  </div>
+                </div>
+
+                <div className="border-b border-zinc-900 pb-2 pt-2 mb-2">
+                  <h4 className="text-[10px] font-mono font-black uppercase text-yellow-400 tracking-wider">Datos Biográficos</h4>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-black block">Edad</label>
+                    <input
+                      type="text"
+                      value={editWikiEdad}
+                      onChange={(e) => setEditWikiEdad(e.target.value)}
+                      placeholder="Ej. 42 años"
+                      className="w-full bg-[#0d0d0d] focus:bg-[#121212] border border-zinc-900 focus:border-yellow-400 text-xs p-3.5 rounded-xl text-zinc-100 outline-none transition-all duration-200 font-sans font-medium placeholder-zinc-700"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-black block">Altura</label>
+                    <input
+                      type="text"
+                      value={editWikiAltura}
+                      onChange={(e) => setEditWikiAltura(e.target.value)}
+                      placeholder="Ej. 1.75 m"
+                      className="w-full bg-[#0d0d0d] focus:bg-[#121212] border border-zinc-900 focus:border-yellow-400 text-xs p-3.5 rounded-xl text-zinc-100 outline-none transition-all duration-200 font-sans font-medium placeholder-zinc-700"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-black block">Peso</label>
+                    <input
+                      type="text"
+                      value={editWikiPeso}
+                      onChange={(e) => setEditWikiPeso(e.target.value)}
+                      placeholder="Ej. 70 kg"
+                      className="w-full bg-[#0d0d0d] focus:bg-[#121212] border border-zinc-900 focus:border-yellow-400 text-xs p-3.5 rounded-xl text-zinc-100 outline-none transition-all duration-200 font-sans font-medium placeholder-zinc-700"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-black block">Estado Civil</label>
+                    <input
+                      type="text"
+                      value={editWikiEstadoCivil}
+                      onChange={(e) => setEditWikiEstadoCivil(e.target.value)}
+                      placeholder="Ej. Casado(a)"
+                      className="w-full bg-[#0d0d0d] focus:bg-[#121212] border border-zinc-900 focus:border-yellow-400 text-xs p-3.5 rounded-xl text-zinc-100 outline-none transition-all duration-200 font-sans font-medium placeholder-zinc-700"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-4 flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsEditWikiModalOpen(false)}
+                    className="w-1/2 bg-zinc-900 hover:bg-zinc-850 text-zinc-400 font-mono font-black text-xs py-3.5 rounded-xl transition-all duration-300 uppercase tracking-widest cursor-pointer border border-zinc-800"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmittingWiki}
+                    className="w-1/2 bg-yellow-400 hover:bg-yellow-350 disabled:bg-zinc-850 disabled:text-zinc-500 text-black font-mono font-black text-xs py-3.5 rounded-xl transition-all duration-300 uppercase tracking-widest cursor-pointer shadow-lg shadow-yellow-400/10 hover:-translate-y-0.5 active:translate-y-0"
+                  >
+                    {isSubmittingWiki ? 'Guardando...' : 'Guardar Cambios'}
                   </button>
                 </div>
               </form>
