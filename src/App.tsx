@@ -95,6 +95,7 @@ export default function App() {
   // Load state from localStorage or use initial values
   const [institutes, setInstitutes] = useState<Institute[]>(INITIAL_INSTITUTES);
   const [alumnos, setAlumnos] = useState<Alumno[]>(INITIAL_ALUMNOS);
+  const [perfiles, setPerfiles] = useState<any[]>([]);
   const [comments, setComments] = useState<AlumnoComment[]>(INITIAL_COMMENTS);
   const [currentUser, setCurrentUser] = useState<{
     name: string;
@@ -257,44 +258,12 @@ export default function App() {
 
   // Synchronize alumnos and comments with Firestore in real-time
   useEffect(() => {
-    const unsubscribeAlumnos = onSnapshot(collection(db, 'alumnos'), async (snapshot) => {
-      if (snapshot.empty) {
-        // If the database has no alumnos yet, seed it with initial values!
-        try {
-          for (const al of INITIAL_ALUMNOS) {
-            const { searchTokens, searchKeywords } = generateSearchArrays(al.name);
-            const mappedAlumno = {
-              id: al.id,
-              name: al.name,
-              nickname: al.nickname || '',
-              instituteId: al.instituteId,
-              avatar: al.avatar,
-              course: al.course,
-              category: al.category,
-              bio: al.bio,
-              starsPopularity: al.starsPopularity,
-              starsCharisma: al.starsCharisma,
-              starsTalent: al.starsTalent,
-              views: al.views,
-              points: al.points,
-              isVerified: al.isVerified || false,
-              instagram: al.instagram || '',
-              tiktok: al.tiktok || '',
-              searchTokens,
-              searchKeywords
-            };
-            await setDoc(doc(db, 'alumnos', al.id), mappedAlumno);
-          }
-        } catch (err) {
-          console.error("Failed to seed initial alumnos:", err);
-        }
-      } else {
-        const list: Alumno[] = [];
-        snapshot.forEach((snapDoc) => {
-          list.push(snapDoc.data() as Alumno);
-        });
-        setAlumnos(list);
-      }
+    const unsubscribeAlumnos = onSnapshot(collection(db, 'alumnos'), (snapshot) => {
+      const list: Alumno[] = [];
+      snapshot.forEach((snapDoc) => {
+        list.push(snapDoc.data() as Alumno);
+      });
+      setAlumnos(list);
     }, (error) => {
       console.warn("Could not fetch alumnos (offline or permissions):", error);
     });
@@ -343,10 +312,21 @@ export default function App() {
       console.warn("Could not fetch centers (offline or permissions):", error);
     });
 
+    const unsubscribePerfiles = onSnapshot(collection(db, 'perfiles'), (snapshot) => {
+      const list: any[] = [];
+      snapshot.forEach((snapDoc) => {
+        list.push(snapDoc.data());
+      });
+      setPerfiles(list);
+    }, (error) => {
+      console.warn("Could not fetch profiles:", error);
+    });
+
     return () => {
       unsubscribeAlumnos();
       unsubscribeComments();
       unsubscribeInstitutes();
+      unsubscribePerfiles();
     };
   }, []);
 
@@ -1136,6 +1116,18 @@ export default function App() {
       .map(item => item.inst);
   }, [globalSearch, institutes]);
 
+  const filteredPerfiles = useMemo(() => {
+    if (!globalSearch.trim()) return [];
+    
+    const queryNormalized = normalizeText(globalSearch);
+    const queryWords = queryNormalized.split(/\s+/).filter(w => w.length > 0);
+    
+    return perfiles.filter(perf => {
+      const nameNorm = normalizeText(perf.nombreCompleto || '');
+      return nameNorm.includes(queryNormalized) || queryWords.every(word => nameNorm.includes(word));
+    });
+  }, [globalSearch, perfiles]);
+
   const filteredAlumnosGlobally = useMemo(() => {
     if (!globalSearch.trim()) return [];
     
@@ -1499,7 +1491,7 @@ export default function App() {
             initial={{ opacity: 0, y: 15 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -15 }}
-            className="relative px-4 pt-20 pb-14 lg:pb-20 text-center z-10 max-w-5xl mx-auto"
+            className="relative px-4 pt-20 pb-4 lg:pb-8 text-center z-10 max-w-5xl mx-auto"
           >
             {/* Crown visual asset decoration with glow */}
             <div className="mx-auto w-14 h-14 bg-yellow-400/10 border border-yellow-400/30 rounded-2xl flex items-center justify-center text-yellow-400 mb-8 animate-pulse shadow-[0_0_20px_rgba(250,204,21,0.15)]">
@@ -1572,14 +1564,12 @@ export default function App() {
                 </div>
 
                 {/* Sub-block 1: Students matching */}
-                <div className="mb-8">
-                  <h3 className="font-display font-semibold text-lg mb-4 flex items-center gap-2">
-                    <Users className="w-5 h-5 text-yellow-400" />
-                    Alumnos Encontrados ({filteredAlumnosGlobally.length})
-                  </h3>
-                  {filteredAlumnosGlobally.length === 0 ? (
-                    <p className="text-xs text-zinc-500 font-mono italic">No se hallaron estudiantes con este nombre o apodo.</p>
-                  ) : (
+                {filteredAlumnosGlobally.length > 0 && (
+                  <div className="mb-8">
+                    <h3 className="font-display font-semibold text-lg mb-4 flex items-center gap-2">
+                      <Users className="w-5 h-5 text-yellow-400" />
+                      Alumnos Encontrados ({filteredAlumnosGlobally.length})
+                    </h3>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                       {filteredAlumnosGlobally.map(al => {
                         const schoolObj = institutes.find(i => i.id === al.instituteId);
@@ -1614,18 +1604,16 @@ export default function App() {
                         );
                       })}
                     </div>
-                  )}
-                </div>
+                  </div>
+                )}
 
                 {/* Sub-block 2: Institutes matching */}
-                <div>
-                  <h3 className="font-display font-semibold text-lg mb-4 flex items-center gap-2">
-                    <School className="w-5 h-5 text-yellow-400" />
-                    Institutos Encontrados ({filteredInstitutes.length})
-                  </h3>
-                  {filteredInstitutes.length === 0 ? (
-                    <p className="text-xs text-zinc-500 font-mono italic">No se hallaron instituciones educativas con este nombre.</p>
-                  ) : (
+                {filteredInstitutes.length > 0 && (
+                  <div className="mb-8">
+                    <h3 className="font-display font-semibold text-lg mb-4 flex items-center gap-2">
+                      <School className="w-5 h-5 text-yellow-400" />
+                      Institutos Encontrados ({filteredInstitutes.length})
+                    </h3>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       {filteredInstitutes.map(inst => (
                         <div 
@@ -1647,8 +1635,39 @@ export default function App() {
                         </div>
                       ))}
                     </div>
-                  )}
-                </div>
+                  </div>
+                )}
+
+                {/* Sub-block 3: Professors matching */}
+                {filteredPerfiles.length > 0 && (
+                  <div>
+                    <h3 className="font-display font-semibold text-lg mb-4 flex items-center gap-2">
+                      <User className="w-5 h-5 text-yellow-400" />
+                      Profesores Encontrados ({filteredPerfiles.length})
+                    </h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {filteredPerfiles.map(prof => (
+                        <div 
+                          key={prof.id}
+                          onClick={() => {
+                            setSelectedProfessorId(prof.id);
+                            if (prof.instituteId) {
+                                setSelectedInstituteId(prof.instituteId);
+                            }
+                          }}
+                          className="bg-zinc-900/40 hover:bg-zinc-900/80 border border-zinc-800/80 rounded-xl p-4 cursor-pointer hover:border-yellow-400/30 transition-all flex items-center gap-4"
+                        >
+                          <div className="text-xl">
+                              {prof.gender === 'male' ? '👨‍🏫' : '👩‍🏫'}
+                          </div>
+                          <div>
+                            <h4 className="font-bold text-xs text-white">{prof.nombreCompleto}</h4>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </motion.div>
             )}
 
@@ -3037,7 +3056,7 @@ export default function App() {
                 </div>
 
                 {/* Permanent Voting Buttons (Yo te conozco / Fan) */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-8 max-w-2xl mx-auto">
+                <div className="grid grid-cols-2 gap-4 mt-8 max-w-2xl mx-auto">
                   
                   {/* Card 1: Yo te conozco */}
                   {(() => {
