@@ -1,3 +1,10 @@
+export interface RedesSociales {
+  instagram?: string;
+  youtube?: string;
+  facebook?: string;
+  twitter?: string;
+}
+
 export interface Institute {
   id: string;
   name: string;
@@ -10,6 +17,10 @@ export interface Institute {
   ratingAverage: number;
   searchTokens?: string[];
   searchKeywords?: string[];
+  perfilPhotoUrl?: string;
+  portadaPhotoUrl?: string;
+  anoDeFundacion?: number | null;
+  redesSociales?: RedesSociales;
 }
 
 export interface Alumno {

@@ -43,7 +43,14 @@ import {
   History,
   Trash2,
   Edit,
-  Edit2
+  Edit2,
+  Calendar,
+  Link2,
+  Pencil,
+  Instagram,
+  Youtube,
+  Facebook,
+  Twitter
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Institute, Alumno, AlumnoComment } from './types';
@@ -117,6 +124,7 @@ export default function App() {
     userId: string;
     photoURL?: string;
     email?: string;
+    sexo?: 'femenino' | 'masculino' | '';
   } | null>(() => {
     const saved = localStorage.getItem('wikistars_user');
     return saved ? JSON.parse(saved) : null;
@@ -170,15 +178,91 @@ export default function App() {
   const [activeBottomTab, setActiveBottomTab] = useState<'feed' | 'profile'>('feed');
   const [userProfile, setUserProfile] = useState<any>(null);
 
+  // Edit Profile form states
+  const [editProfileName, setEditProfileName] = useState('');
+  const [editProfileNickname, setEditProfileNickname] = useState('');
+  const [editProfileSexo, setEditProfileSexo] = useState<'femenino' | 'masculino' | ''>('');
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [profileErrors, setProfileErrors] = useState<Record<string, string>>({});
+
+  // Wiki Edit States
+  const [isEditingWiki, setIsEditingWiki] = useState(false);
+  const [wikiPerfilPhoto, setWikiPerfilPhoto] = useState('');
+  const [wikiPortadaPhoto, setWikiPortadaPhoto] = useState('');
+  const [wikiAnoFundacion, setWikiAnoFundacion] = useState('');
+  const [wikiInstagram, setWikiInstagram] = useState('');
+  const [wikiYoutube, setWikiYoutube] = useState('');
+  const [wikiFacebook, setWikiFacebook] = useState('');
+  const [wikiTwitter, setWikiTwitter] = useState('');
+  const [wikiErrors, setWikiErrors] = useState<Record<string, string>>({});
+  const [isSubmittingWikiEdit, setIsSubmittingWikiEdit] = useState(false);
+
   useEffect(() => {
-    if (activeBottomTab === 'profile' && currentUser?.userId) {
-      const fetchProfile = async () => {
-        const userDoc = await getDoc(doc(db, 'users', currentUser.userId));
-        if (userDoc.exists()) {
-          setUserProfile(userDoc.data());
-        }
-      };
-      fetchProfile();
+    if (activeBottomTab === 'profile') {
+      if (currentUser?.userId) {
+        const fetchProfile = async () => {
+          try {
+            const userDoc = await getDoc(doc(db, 'users', currentUser.userId));
+            if (userDoc.exists()) {
+              const data = userDoc.data();
+              const prof = {
+                displayName: data.displayName || data.name || currentUser.name || 'Estudiante',
+                nickname: data.nickname || currentUser.nickname || 'estudiante',
+                email: data.email || currentUser.email || 'Invitado (No vinculado)',
+                photoURL: data.photoURL || currentUser.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=100',
+                sexo: data.sexo || currentUser.sexo || '',
+                userId: currentUser.userId
+              };
+              setUserProfile(prof);
+              setEditProfileName(prof.displayName);
+              setEditProfileNickname(prof.nickname);
+              setEditProfileSexo(prof.sexo as any);
+            } else {
+              const prof = {
+                displayName: currentUser.name || 'Estudiante',
+                nickname: currentUser.nickname || 'estudiante',
+                email: currentUser.email || 'Invitado (No vinculado)',
+                photoURL: currentUser.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=100',
+                sexo: currentUser.sexo || '',
+                userId: currentUser.userId
+              };
+              setUserProfile(prof);
+              setEditProfileName(prof.displayName);
+              setEditProfileNickname(prof.nickname);
+              setEditProfileSexo(prof.sexo as any);
+            }
+          } catch (err) {
+            console.error("Error fetching user profile:", err);
+            const prof = {
+              displayName: currentUser.name || 'Estudiante',
+              nickname: currentUser.nickname || 'estudiante',
+              email: currentUser.email || 'Invitado (No vinculado)',
+              photoURL: currentUser.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=100',
+              sexo: currentUser.sexo || '',
+              userId: currentUser.userId
+            };
+            setUserProfile(prof);
+            setEditProfileName(prof.displayName);
+            setEditProfileNickname(prof.nickname);
+            setEditProfileSexo(prof.sexo as any);
+          }
+        };
+        fetchProfile();
+      } else {
+        // completely anonymous
+        const prof = {
+          displayName: 'Invitado Anónimo',
+          nickname: 'anonimo',
+          email: 'No vinculado',
+          photoURL: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=100',
+          sexo: '',
+          userId: 'anonymous'
+        };
+        setUserProfile(prof);
+        setEditProfileName('');
+        setEditProfileNickname('');
+        setEditProfileSexo('');
+      }
     }
   }, [activeBottomTab, currentUser]);
 
@@ -334,7 +418,11 @@ export default function App() {
           location: data.location || 'Sede Principal',
           studentCount: data.studentCount || 0,
           popularCategory: data.popularCategory || 'General',
-          ratingAverage: data.ratingAverage || 4.5
+          ratingAverage: data.ratingAverage || 4.5,
+          perfilPhotoUrl: data.perfilPhotoUrl || '',
+          portadaPhotoUrl: data.portadaPhotoUrl || '',
+          anoDeFundacion: data.anoDeFundacion !== undefined ? data.anoDeFundacion : null,
+          redesSociales: data.redesSociales || {}
         });
       });
       setInstitutes(list);
@@ -910,6 +998,91 @@ export default function App() {
       }
     }
   }, [editWikiYear, editWikiMonth, editWikiDay]);
+
+  const startEditingWiki = () => {
+    if (!currentSelectedInstitute) return;
+    setWikiPerfilPhoto(currentSelectedInstitute.perfilPhotoUrl || currentSelectedInstitute.image || '');
+    setWikiPortadaPhoto(currentSelectedInstitute.portadaPhotoUrl || '');
+    setWikiAnoFundacion(currentSelectedInstitute.anoDeFundacion ? String(currentSelectedInstitute.anoDeFundacion) : '');
+    setWikiInstagram(currentSelectedInstitute.redesSociales?.instagram || '');
+    setWikiYoutube(currentSelectedInstitute.redesSociales?.youtube || '');
+    setWikiFacebook(currentSelectedInstitute.redesSociales?.facebook || '');
+    setWikiTwitter(currentSelectedInstitute.redesSociales?.twitter || '');
+    setWikiErrors({});
+    setIsEditingWiki(true);
+  };
+
+  const handleSaveInstituteWiki = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedInstituteId || isSubmittingWikiEdit) return;
+    
+    const errors: Record<string, string> = {};
+    
+    // 1. Validation for Facebook-only images
+    const isFacebookDomain = (url: string) => {
+      const u = url.trim().toLowerCase();
+      return u.includes('facebook.com') || u.includes('fbcdn.net') || u.includes('fbcdn.com') || u.includes('fb.com');
+    };
+    
+    if (wikiPerfilPhoto.trim()) {
+      if (!isFacebookDomain(wikiPerfilPhoto)) {
+        errors.perfilPhoto = 'Solo se permiten enlaces de imágenes de Facebook (ej. facebook.com, fbcdn.net, fb.com).';
+      }
+    }
+    
+    if (wikiPortadaPhoto.trim()) {
+      if (!isFacebookDomain(wikiPortadaPhoto)) {
+        errors.portadaPhoto = 'Solo se permiten enlaces de imágenes de Facebook (ej. facebook.com, fbcdn.net, fb.com).';
+      }
+    }
+    
+    // 2. Validation for specific Social networks
+    if (wikiInstagram.trim() && !wikiInstagram.trim().toLowerCase().includes('instagram.com') && !wikiInstagram.trim().toLowerCase().includes('instagr.am')) {
+      errors.instagram = 'El enlace debe ser de Instagram (instagram.com).';
+    }
+    
+    if (wikiYoutube.trim() && !wikiYoutube.trim().toLowerCase().includes('youtube.com') && !wikiYoutube.trim().toLowerCase().includes('youtu.be')) {
+      errors.youtube = 'El enlace debe ser de YouTube (youtube.com o youtu.be).';
+    }
+    
+    if (wikiFacebook.trim() && !wikiFacebook.trim().toLowerCase().includes('facebook.com') && !wikiFacebook.trim().toLowerCase().includes('fb.com')) {
+      errors.facebook = 'El enlace debe ser de Facebook (facebook.com o fb.com).';
+    }
+    
+    if (wikiTwitter.trim() && !wikiTwitter.trim().toLowerCase().includes('twitter.com') && !wikiTwitter.trim().toLowerCase().includes('x.com')) {
+      errors.twitter = 'El enlace debe ser de Twitter / X (twitter.com o x.com).';
+    }
+    
+    if (Object.keys(errors).length > 0) {
+      setWikiErrors(errors);
+      return;
+    }
+    
+    setWikiErrors({});
+    setIsSubmittingWikiEdit(true);
+    try {
+      const yearNum = wikiAnoFundacion && wikiAnoFundacion.trim() ? parseInt(wikiAnoFundacion, 10) : null;
+      
+      const updateData = {
+        perfilPhotoUrl: wikiPerfilPhoto.trim(),
+        portadaPhotoUrl: wikiPortadaPhoto.trim(),
+        anoDeFundacion: yearNum,
+        redesSociales: {
+          instagram: wikiInstagram.trim(),
+          youtube: wikiYoutube.trim(),
+          facebook: wikiFacebook.trim(),
+          twitter: wikiTwitter.trim(),
+        }
+      };
+      
+      await setDoc(doc(db, 'centros.educativos', selectedInstituteId), updateData, { merge: true });
+      setIsEditingWiki(false);
+    } catch (error) {
+      console.error("Error updating institute wiki:", error);
+    } finally {
+      setIsSubmittingWikiEdit(false);
+    }
+  };
 
   const handleSubmitWiki = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1488,6 +1661,81 @@ export default function App() {
     setCurrentUser(null);
     localStorage.removeItem('wikistars_user');
     triggerNotice('Has cerrado sesión en tu pasaporte estudiantil.');
+  };
+
+  // Save profile changes
+  const handleSaveProfileSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setProfileErrors({});
+    
+    // Validations
+    const errors: Record<string, string> = {};
+    if (!editProfileName.trim()) {
+      errors.name = 'El nombre completo real es obligatorio.';
+    }
+    if (!editProfileNickname.trim()) {
+      errors.nickname = 'El nombre de usuario es obligatorio.';
+    } else if (editProfileNickname.trim().includes(' ')) {
+      errors.nickname = 'El nombre de usuario no puede contener espacios.';
+    }
+    
+    if (Object.keys(errors).length > 0) {
+      setProfileErrors(errors);
+      return;
+    }
+    
+    setIsSavingProfile(true);
+    try {
+      let finalUserId = currentUser?.userId;
+      const isAnon = !finalUserId || finalUserId === 'anonymous' || finalUserId.startsWith('user-');
+      if (!finalUserId || finalUserId === 'anonymous') {
+        // Generate a new guest UID if completely anonymous
+        finalUserId = 'user-' + Date.now();
+      }
+      
+      const updatedUser = {
+        name: editProfileName.trim(),
+        nickname: editProfileNickname.trim().replace('@', '').toLowerCase(),
+        instituteId: currentUser?.instituteId || '1',
+        category: currentUser?.category || 'Influencer',
+        userId: finalUserId,
+        photoURL: currentUser?.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=100',
+        email: currentUser?.email || '',
+        sexo: editProfileSexo
+      };
+      
+      // Update local state and local storage
+      setCurrentUser(updatedUser);
+      localStorage.setItem('wikistars_user', JSON.stringify(updatedUser));
+      
+      // Update in Firestore users collection if logged in with Google
+      const isRealFirebaseUser = auth.currentUser?.uid === finalUserId;
+      if (isRealFirebaseUser) {
+        await setDoc(doc(db, 'users', finalUserId), {
+          displayName: editProfileName.trim(),
+          nickname: editProfileNickname.trim().replace('@', '').toLowerCase(),
+          sexo: editProfileSexo,
+          lastLogin: new Date()
+        }, { merge: true });
+      }
+      
+      setUserProfile({
+        displayName: editProfileName.trim(),
+        nickname: editProfileNickname.trim().replace('@', '').toLowerCase(),
+        email: currentUser?.email || 'Invitado (No vinculado)',
+        photoURL: currentUser?.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=100',
+        sexo: editProfileSexo,
+        userId: finalUserId
+      });
+      
+      triggerNotice('¡Perfil actualizado con éxito!');
+      pushSocialLog(`👤 @${editProfileNickname.trim()} actualizó su perfil`);
+    } catch (err) {
+      console.error("Error saving profile:", err);
+      triggerNotice('Error al guardar los cambios del perfil.');
+    } finally {
+      setIsSavingProfile(false);
+    }
   };
 
   // Filters computed
@@ -2242,9 +2490,10 @@ export default function App() {
               {/* Cover Banner Image with elegant vignette */}
               <div className="h-40 md:h-56 relative bg-gradient-to-b from-zinc-900 to-zinc-950">
                 <img 
-                  src={currentSelectedInstitute.image} 
+                  src={currentSelectedInstitute.portadaPhotoUrl || currentSelectedInstitute.image} 
                   alt={currentSelectedInstitute.name} 
                   className="w-full h-full object-cover opacity-45" 
+                  referrerPolicy="no-referrer"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/20 to-transparent" />
                 
@@ -2285,14 +2534,15 @@ export default function App() {
                 <div className="flex flex-col md:flex-row md:items-center gap-5 -mt-10 md:-mt-14 w-full md:w-auto">
                   
                   {/* Dynamic Big Circular Avatar with Letter "I" */}
-                  <div className="w-20 h-20 md:w-28 md:h-28 rounded-full bg-[#161618] border-4 border-[#050505] flex items-center justify-center text-zinc-450 font-mono font-black text-3xl md:text-5xl shadow-2xl shrink-0 selection:bg-transparent select-none select-none text-zinc-450 text-white">
-                    {currentSelectedInstitute.name ? currentSelectedInstitute.name.charAt(0).toUpperCase() : 'I'}
+                  <div className="w-20 h-20 md:w-28 md:h-28 rounded-full bg-[#161618] border-4 border-[#050505] flex items-center justify-center text-zinc-450 font-mono font-black text-3xl md:text-5xl shadow-2xl shrink-0 selection:bg-transparent select-none select-none text-zinc-450 text-white overflow-hidden">
+                    {currentSelectedInstitute.perfilPhotoUrl ? (
+                      <img src={currentSelectedInstitute.perfilPhotoUrl} alt={currentSelectedInstitute.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    ) : (
+                      currentSelectedInstitute.name ? currentSelectedInstitute.name.charAt(0).toUpperCase() : 'I'
+                    )}
                   </div>
 
                   <div className="space-y-1.5 max-w-xl">
-                    <span className="text-[9px] text-yellow-400 font-mono tracking-widest font-black uppercase bg-yellow-400/10 border border-yellow-400/30 px-3 py-1 rounded-lg inline-block mb-3 shadow-sm">
-                      CAMPUS ACTIVO DE ESTUDIOS
-                    </span>
                     <h2 className="text-xl md:text-3xl font-display font-black text-white uppercase tracking-tight leading-snug">
                       {currentSelectedInstitute.name}
                     </h2>
@@ -2303,22 +2553,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Right side: quick stats columns */}
-                <div className="flex gap-4 self-stretch md:self-auto justify-between md:justify-start shrink-0">
-                  <div className="bg-[#121214]/60 border border-zinc-900/80 px-4 py-2.5 rounded-2xl text-center shadow-md min-w-[75px] md:min-w-[90px]">
-                    <span className="block text-[8px] text-zinc-500 font-mono font-black uppercase tracking-wider">Estrellas</span>
-                    <span className="text-sm md:text-base font-black text-white font-mono">
-                      {alumnos.filter(a => a.instituteId === selectedInstituteId).length}
-                    </span>
-                  </div>
-                  <div className="bg-[#121214]/60 border border-zinc-900/80 px-4 py-2.5 rounded-2xl text-center shadow-md min-w-[95px] md:min-w-[110px]">
-                    <span className="block text-[8px] text-zinc-500 font-mono font-black uppercase tracking-wider">Promedio</span>
-                    <span className="text-sm md:text-base font-black text-yellow-400 font-mono flex items-center gap-0.5 justify-center">
-                      ★ {currentSelectedInstitute.ratingAverage}
-                    </span>
-                  </div>
-                </div>
-
               </div>
 
               {/* Description bar */}
@@ -2326,16 +2560,6 @@ export default function App() {
                 <span className="block max-w-2xl font-sans font-medium text-zinc-400">
                   {currentSelectedInstitute.description || 'Este instituto de calidad ofrece disciplinas y carreras profesionales en constante innovación académica.'}
                 </span>
-                
-                {/* Nominate button */}
-                <button
-                  id="btn-nominate-student"
-                  onClick={() => setIsNominateModalOpen(true)}
-                  className="bg-yellow-400 text-black hover:bg-yellow-300 font-black text-[11px] px-5 py-3 rounded-full flex items-center justify-center gap-2 transition-all duration-300 font-mono tracking-wider shadow-[0_4px_15px_rgba(250,204,21,0.2)] hover:shadow-[0_4px_20px_rgba(250,204,21,0.35)] hover:-translate-y-0.5 active:translate-y-0 cursor-pointer uppercase shrink-0"
-                >
-                  <PlusCircle className="w-4 h-4 text-black" />
-                  NOMINAR UNA ESTRELLA 🌟
-                </button>
               </div>
             </div>
 
@@ -2350,7 +2574,7 @@ export default function App() {
                 value={studentSearch}
                 onChange={(e) => {
                   setStudentSearch(e.target.value);
-                  if (activeCampusTab !== 'Profesores' && activeCampusTab !== 'Wiki') {
+                  if (activeCampusTab !== 'Profesores') {
                     setActiveCampusTab('Profesores');
                   }
                 }}
@@ -2710,75 +2934,6 @@ export default function App() {
                 </motion.div>
               )}
 
-              {/* TAB 2: WIKI DETAILED INFO */}
-              {activeCampusTab === 'Wiki' && (
-                <motion.div
-                  key="tab-wiki-panel"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                  className="bg-[#0b0b0c] border border-zinc-900 p-5 sm:p-8 rounded-2xl space-y-6"
-                >
-                  <div className="border-b border-zinc-800 pb-5">
-                    <h3 className="font-display font-black text-lg text-white uppercase tracking-wider flex items-center gap-2">
-                      <BookOpen className="w-5 h-5 text-[#fbbf24]" />
-                      WIKI-CAMPUS DATABASE: {currentSelectedInstitute.name}
-                    </h3>
-                    <p className="text-xs text-zinc-400 mt-2 font-mono">
-                      Última sincronización comunitaria realizada hace pocos minutos • Datos 100% moderados democráticamente.
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div className="md:col-span-2 space-y-5">
-                      <div>
-                        <h4 className="font-sans font-black text-sm text-zinc-200 uppercase tracking-tight">Descripción Oficial de la Entidad</h4>
-                        <p className="text-zinc-400 text-xs sm:text-sm mt-3 leading-relaxed">
-                          {currentSelectedInstitute.description || 'El centro formativo representa un pilar regional en la instrucción pedagógica superior, técnica o académica de los estudiantes locales. A través del registro social en la plataforma WikiStars, los estudiantes construyen activamente su identidad compartida, destacando las habilidades y el perfil biográfico de los líderes en cada área.'}
-                        </p>
-                      </div>
-
-                      <div className="bg-zinc-900/40 border border-zinc-900 p-4 rounded-xl space-y-3">
-                        <h4 className="font-sans font-bold text-xs text-yellow-400 uppercase tracking-widest font-mono">
-                          ✓ MÁS INFORMACIÓN CON VALOR PEDAGÓGICO
-                        </h4>
-                        <ul className="text-xs text-zinc-400 space-y-2 list-disc list-inside leading-relaxed font-sans font-medium">
-                          <li>Sede de Formación docente especializada con altos estándares en la región de Uchiza.</li>
-                          <li>Fomento al desarrollo Artístico, Deportivo y Tecnológico del alumnado.</li>
-                          <li>Organismo con representación provincial en eventos intelectuales destacados.</li>
-                          <li>Comunidad estudiantil unida para rescatar la excelencia local.</li>
-                        </ul>
-                      </div>
-                    </div>
-
-                    {/* Stats table */}
-                    <div className="bg-[#0f0f12] border border-zinc-900 p-5 rounded-2xl space-y-4 h-fit">
-                      <h4 className="font-mono text-xs font-black text-zinc-400 uppercase tracking-wider">Estadísticas de la Ficha</h4>
-                      <div className="space-y-3 border-t border-zinc-900 pt-3 text-xs font-mono">
-                        <div className="flex justify-between">
-                          <span className="text-zinc-500">Estrellas Registradas</span>
-                          <span className="text-white font-black">{alumnos.filter(a => a.instituteId === selectedInstituteId).length}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-zinc-500">Categoría Popular</span>
-                          <span className="text-yellow-400 font-bold uppercase">{currentSelectedInstitute.popularCategory || 'Académico'}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-zinc-500">Promedio General</span>
-                          <span className="text-zinc-300 font-bold">★ {currentSelectedInstitute.ratingAverage}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-zinc-500">Votos Emitidos</span>
-                          <span className="text-white font-black">
-                            {alumnos.filter(a => a.instituteId === selectedInstituteId).reduce((acc, currentVal) => acc + currentVal.points, 0)} votos
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-
               {/* TAB 3: HERMOSO (Hall of fame) (ELIMINADO) */}
               {false && (
                 <motion.div
@@ -2861,6 +3016,384 @@ export default function App() {
                   {alumnos.filter(a => a.instituteId === selectedInstituteId).length === 0 && (
                     <div className="text-center py-10 text-zinc-500 text-xs">No hay postulantes registrados en el campus.</div>
                   )}
+                </motion.div>
+              )}
+
+              {/* TAB: CLEAN & SIMPLIFIED WIKI */}
+              {activeCampusTab === 'Wiki' && (
+                <motion.div
+                  key="tab-wiki-panel"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  className="bg-[#0b0b0c] border border-zinc-900 p-6 sm:p-8 rounded-2xl space-y-6"
+                >
+                  <div className="border-b border-zinc-900 pb-4 flex flex-row justify-between items-start gap-4">
+                    <div className="text-left">
+                      <h3 className="font-sans font-bold text-lg sm:text-xl text-white tracking-tight">
+                        Información del Instituto
+                      </h3>
+                      <p className="text-xs text-zinc-400 font-sans mt-0.5">
+                        Datos sobre {currentSelectedInstitute.name}.
+                      </p>
+                    </div>
+                    {!isEditingWiki && (
+                      <button
+                        onClick={startEditingWiki}
+                        className="bg-[#0c0c0e] hover:bg-zinc-900 text-white border border-zinc-800 hover:border-zinc-700 text-xs font-sans font-medium px-4 py-2 rounded-lg flex items-center justify-center gap-2 transition-all duration-200 cursor-pointer shadow-sm"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                        Editar
+                      </button>
+                    )}
+                  </div>
+
+                  {isEditingWiki ? (
+                    <form onSubmit={handleSaveInstituteWiki} className="space-y-6 text-left">
+                      {/* Photo inputs */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                        <div className="bg-[#070708] border border-zinc-900 p-4 rounded-xl space-y-3">
+                          <label className="text-[10px] text-zinc-400 uppercase font-mono tracking-wider font-bold block">
+                            Enlace de Imagen (Perfil)
+                          </label>
+                          <div className="flex gap-3">
+                            <div className="w-12 h-12 rounded-lg bg-zinc-900 border border-zinc-800 shrink-0 overflow-hidden flex items-center justify-center">
+                              {wikiPerfilPhoto ? (
+                                <img src={wikiPerfilPhoto} alt="Perfil" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                              ) : (
+                                <School className="w-5 h-5 text-zinc-600" />
+                              )}
+                            </div>
+                            <div className="relative flex-1">
+                              <input
+                                type="url"
+                                value={wikiPerfilPhoto}
+                                onChange={(e) => setWikiPerfilPhoto(e.target.value)}
+                                placeholder="https://ejemplo.com/perfil.jpg"
+                                className={`w-full bg-[#0c0c0d] border ${wikiErrors.perfilPhoto ? 'border-red-500 focus:border-red-500' : 'border-zinc-800 focus:border-yellow-400'} text-xs p-3 pr-10 rounded-xl text-zinc-100 outline-none transition-all duration-200`}
+                              />
+                              {wikiPerfilPhoto && (
+                                <button
+                                  type="button"
+                                  onClick={() => setWikiPerfilPhoto('')}
+                                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white cursor-pointer"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          {wikiErrors.perfilPhoto && (
+                            <p className="text-red-500 font-mono text-[10px] mt-1 text-left leading-relaxed">
+                              ⚠️ {wikiErrors.perfilPhoto}
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="bg-[#070708] border border-[#070708] p-4 rounded-xl space-y-3">
+                          <label className="text-[10px] text-zinc-400 uppercase font-mono tracking-wider font-bold block">
+                            Enlace de Foto de Portada
+                          </label>
+                          <div className="flex gap-3">
+                            <div className="w-12 h-12 rounded-lg bg-zinc-900 border border-zinc-800 shrink-0 overflow-hidden flex items-center justify-center">
+                              {wikiPortadaPhoto ? (
+                                <img src={wikiPortadaPhoto} alt="Portada" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                              ) : (
+                                <School className="w-5 h-5 text-zinc-600" />
+                              )}
+                            </div>
+                            <div className="relative flex-1">
+                              <input
+                                type="url"
+                                value={wikiPortadaPhoto}
+                                onChange={(e) => setWikiPortadaPhoto(e.target.value)}
+                                placeholder="https://ejemplo.com/portada.jpg"
+                                className={`w-full bg-[#0c0c0d] border ${wikiErrors.portadaPhoto ? 'border-red-500 focus:border-red-500' : 'border-zinc-800 focus:border-yellow-400'} text-xs p-3 pr-10 rounded-xl text-zinc-100 outline-none transition-all duration-200`}
+                              />
+                              {wikiPortadaPhoto && (
+                                <button
+                                  type="button"
+                                  onClick={() => setWikiPortadaPhoto('')}
+                                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white cursor-pointer"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          {wikiErrors.portadaPhoto && (
+                            <p className="text-red-500 font-mono text-[10px] mt-1 text-left leading-relaxed">
+                              ⚠️ {wikiErrors.portadaPhoto}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Year input */}
+                      <div className="bg-[#070708] border border-zinc-900 p-4 rounded-xl space-y-3">
+                        <label className="text-[10px] text-zinc-400 uppercase font-mono tracking-wider font-bold block">
+                          Año de Fundación
+                        </label>
+                        <select
+                          value={wikiAnoFundacion}
+                          onChange={(e) => setWikiAnoFundacion(e.target.value)}
+                          className="w-full bg-[#0c0c0d] border border-zinc-800 focus:border-yellow-400 text-xs p-3 rounded-xl text-zinc-100 outline-none transition-all duration-200 cursor-pointer"
+                        >
+                          <option value="">Selecciona un año (No especificado)</option>
+                          {Array.from({ length: new Date().getFullYear() - 1900 + 1 }, (_, i) => new Date().getFullYear() - i).map((y) => (
+                            <option key={y} value={y}>{y}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Social Network inputs */}
+                      <div className="bg-[#070708] border border-zinc-900 p-5 rounded-xl space-y-4">
+                        <span className="text-[10px] text-zinc-400 uppercase font-mono tracking-wider font-bold block border-b border-zinc-900 pb-2">
+                          Redes Sociales
+                        </span>
+                        
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] text-zinc-500 font-mono flex items-center gap-1.5">
+                              <Instagram className="w-3 h-3 text-pink-500" /> Instagram
+                            </label>
+                            <div className="relative">
+                              <input
+                                type="url"
+                                value={wikiInstagram}
+                                onChange={(e) => setWikiInstagram(e.target.value)}
+                                placeholder="https://instagram.com/nombre"
+                                className={`w-full bg-[#0c0c0d] border ${wikiErrors.instagram ? 'border-red-500 focus:border-red-500' : 'border-zinc-800 focus:border-yellow-400'} text-xs p-3 pr-10 rounded-xl text-zinc-100 outline-none transition-all duration-200`}
+                              />
+                              {wikiInstagram && (
+                                <button
+                                  type="button"
+                                  onClick={() => setWikiInstagram('')}
+                                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white cursor-pointer"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                            {wikiErrors.instagram && (
+                              <p className="text-red-500 font-mono text-[9px] mt-0.5 leading-tight">
+                                ⚠️ {wikiErrors.instagram}
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] text-zinc-500 font-mono flex items-center gap-1.5">
+                              <Youtube className="w-3 h-3 text-red-500" /> YouTube
+                            </label>
+                            <div className="relative">
+                              <input
+                                type="url"
+                                value={wikiYoutube}
+                                onChange={(e) => setWikiYoutube(e.target.value)}
+                                placeholder="https://youtube.com/c/canal"
+                                className={`w-full bg-[#0c0c0d] border ${wikiErrors.youtube ? 'border-red-500 focus:border-red-500' : 'border-zinc-800 focus:border-yellow-400'} text-xs p-3 pr-10 rounded-xl text-zinc-100 outline-none transition-all duration-200`}
+                              />
+                              {wikiYoutube && (
+                                <button
+                                  type="button"
+                                  onClick={() => setWikiYoutube('')}
+                                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white cursor-pointer"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                            {wikiErrors.youtube && (
+                              <p className="text-red-500 font-mono text-[9px] mt-0.5 leading-tight">
+                                ⚠️ {wikiErrors.youtube}
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] text-zinc-500 font-mono flex items-center gap-1.5">
+                              <Facebook className="w-3 h-3 text-blue-500" /> Facebook
+                            </label>
+                            <div className="relative">
+                              <input
+                                type="url"
+                                value={wikiFacebook}
+                                onChange={(e) => setWikiFacebook(e.target.value)}
+                                placeholder="https://facebook.com/pagina"
+                                className={`w-full bg-[#0c0c0d] border ${wikiErrors.facebook ? 'border-red-500 focus:border-red-500' : 'border-zinc-800 focus:border-yellow-400'} text-xs p-3 pr-10 rounded-xl text-zinc-100 outline-none transition-all duration-200`}
+                              />
+                              {wikiFacebook && (
+                                <button
+                                  type="button"
+                                  onClick={() => setWikiFacebook('')}
+                                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white cursor-pointer"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                            {wikiErrors.facebook && (
+                              <p className="text-red-500 font-mono text-[9px] mt-0.5 leading-tight">
+                                ⚠️ {wikiErrors.facebook}
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] text-zinc-500 font-mono flex items-center gap-1.5">
+                              <Twitter className="w-3 h-3 text-zinc-300" /> Twitter / X
+                            </label>
+                            <div className="relative">
+                              <input
+                                type="url"
+                                value={wikiTwitter}
+                                onChange={(e) => setWikiTwitter(e.target.value)}
+                                placeholder="https://x.com/usuario"
+                                className={`w-full bg-[#0c0c0d] border ${wikiErrors.twitter ? 'border-red-500 focus:border-red-500' : 'border-zinc-800 focus:border-yellow-400'} text-xs p-3 pr-10 rounded-xl text-zinc-100 outline-none transition-all duration-200`}
+                              />
+                              {wikiTwitter && (
+                                <button
+                                  type="button"
+                                  onClick={() => setWikiTwitter('')}
+                                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white cursor-pointer"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                            {wikiErrors.twitter && (
+                              <p className="text-red-500 font-mono text-[9px] mt-0.5 leading-tight">
+                                ⚠️ {wikiErrors.twitter}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Action buttons */}
+                      <div className="flex justify-end gap-3 pt-3 border-t border-zinc-900/80">
+                        <button
+                          type="button"
+                          onClick={() => setIsEditingWiki(false)}
+                          className="bg-zinc-950 hover:bg-zinc-900 text-zinc-400 px-5 py-3 rounded-xl text-xs font-mono font-bold transition-all duration-200 cursor-pointer"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={isSubmittingWikiEdit}
+                          className="bg-yellow-400 text-black hover:bg-yellow-300 disabled:opacity-50 font-black text-xs px-6 py-3 rounded-xl flex items-center justify-center gap-2 transition-all duration-200 cursor-pointer uppercase tracking-wider font-mono shadow-sm"
+                        >
+                          {isSubmittingWikiEdit ? 'Guardando...' : 'Guardar Cambios'}
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <div className="space-y-6 text-left">
+                      {/* Año de Fundación */}
+                      <div className="flex items-start gap-4 py-2">
+                        <Calendar className="w-5 h-5 text-zinc-500 shrink-0 mt-0.5" />
+                        <div className="space-y-0.5">
+                          <span className="block text-xs text-zinc-400 font-sans">Año de Fundación</span>
+                          <span className="text-sm sm:text-base font-sans font-black text-white">
+                            {currentSelectedInstitute.anoDeFundacion || 'No especificado'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="border-t border-zinc-900/80" />
+
+                      {/* Redes Sociales */}
+                      <div className="space-y-4">
+                        <div className="flex items-center gap-2">
+                          <Link2 className="w-4 h-4 text-zinc-500 shrink-0" />
+                          <span className="text-xs text-zinc-400 font-sans">Redes Sociales</span>
+                        </div>
+
+                        <div className="flex flex-wrap gap-6 pl-1">
+                          {currentSelectedInstitute.redesSociales?.facebook && (
+                            <a
+                              href={currentSelectedInstitute.redesSociales.facebook}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex flex-col items-center gap-2 group cursor-pointer"
+                            >
+                              <div className="w-14 h-14 rounded-2xl bg-[#141416] hover:bg-[#1a1a1d] border border-zinc-800/80 group-hover:border-blue-500/30 flex items-center justify-center transition-all duration-200">
+                                <Facebook className="w-5 h-5 text-white group-hover:text-blue-400 transition-colors" />
+                              </div>
+                              <span className="text-[11px] font-sans text-zinc-400 group-hover:text-white transition-colors">
+                                Facebook
+                              </span>
+                            </a>
+                          )}
+
+                          {currentSelectedInstitute.redesSociales?.instagram && (
+                            <a
+                              href={currentSelectedInstitute.redesSociales.instagram}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex flex-col items-center gap-2 group cursor-pointer"
+                            >
+                              <div className="w-14 h-14 rounded-2xl bg-[#141416] hover:bg-[#1a1a1d] border border-zinc-800/80 group-hover:border-pink-500/30 flex items-center justify-center transition-all duration-200">
+                                <Instagram className="w-5 h-5 text-white group-hover:text-pink-400 transition-colors" />
+                              </div>
+                              <span className="text-[11px] font-sans text-zinc-400 group-hover:text-white transition-colors">
+                                Instagram
+                              </span>
+                            </a>
+                          )}
+
+                          {currentSelectedInstitute.redesSociales?.youtube && (
+                            <a
+                              href={currentSelectedInstitute.redesSociales.youtube}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex flex-col items-center gap-2 group cursor-pointer"
+                            >
+                              <div className="w-14 h-14 rounded-2xl bg-[#141416] hover:bg-[#1a1a1d] border border-zinc-800/80 group-hover:border-red-500/30 flex items-center justify-center transition-all duration-200">
+                                <Youtube className="w-5 h-5 text-white group-hover:text-red-400 transition-colors" />
+                              </div>
+                              <span className="text-[11px] font-sans text-zinc-400 group-hover:text-white transition-colors">
+                                YouTube
+                              </span>
+                            </a>
+                          )}
+
+                          {currentSelectedInstitute.redesSociales?.twitter && (
+                            <a
+                              href={currentSelectedInstitute.redesSociales.twitter}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex flex-col items-center gap-2 group cursor-pointer"
+                            >
+                              <div className="w-14 h-14 rounded-2xl bg-[#141416] hover:bg-[#1a1a1d] border border-zinc-800/80 group-hover:border-zinc-400/30 flex items-center justify-center transition-all duration-200">
+                                <Twitter className="w-5 h-5 text-white group-hover:text-zinc-300 transition-colors" />
+                              </div>
+                              <span className="text-[11px] font-sans text-zinc-400 group-hover:text-white transition-colors">
+                                Twitter / X
+                              </span>
+                            </a>
+                          )}
+
+                          {(!currentSelectedInstitute.redesSociales?.instagram &&
+                            !currentSelectedInstitute.redesSociales?.youtube &&
+                            !currentSelectedInstitute.redesSociales?.facebook &&
+                            !currentSelectedInstitute.redesSociales?.twitter) && (
+                            <p className="text-xs text-zinc-500 italic font-sans leading-relaxed">
+                              No se han registrado redes sociales oficiales. ¡Contribuye editando la Wiki!
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="pt-4 border-t border-zinc-900/60 text-left">
+                    <p className="text-[10px] sm:text-xs text-zinc-500 font-mono uppercase tracking-wide">
+                      ✏️ Sincronización comunitaria democrática. Cualquiera puede contribuir con datos verificados.
+                    </p>
+                  </div>
                 </motion.div>
               )}
 
@@ -4775,7 +5308,7 @@ export default function App() {
       {/* Floating Action Button (FAB) removed */}
 
       {/* --- BOTTOM NAVIGATION --- */}
-      <div className="fixed bottom-0 left-0 right-0 z-50 bg-black border-t border-zinc-900 flex justify-around p-3">
+      <div className="fixed bottom-0 left-0 right-0 z-[100] bg-black border-t border-zinc-900 flex justify-around p-3">
         <button onClick={() => setActiveBottomTab('feed')} className={`flex flex-col items-center gap-1 ${activeBottomTab === 'feed' ? 'text-yellow-400' : 'text-zinc-500'}`}>
           <Home className="w-5 h-5" />
           <span className="text-[10px] uppercase font-bold">Feed</span>
@@ -4787,13 +5320,182 @@ export default function App() {
       </div>
 
       {activeBottomTab === 'profile' && userProfile && (
-        <div className="fixed inset-0 z-40 bg-black pt-20 p-6">
-          <button onClick={() => setActiveBottomTab('feed')} className="text-white mb-6">← Volver al Feed</button>
-          <h2 className="text-white font-display font-black text-2xl uppercase">Mi Perfil</h2>
-          <div className="mt-6 bg-zinc-900 p-6 rounded-2xl flex flex-col items-center">
-             <img src={userProfile.photoURL} className="w-20 h-20 rounded-full border-2 border-yellow-400" />
-             <h3 className="text-white font-bold text-lg mt-4">{userProfile.displayName}</h3>
-             <p className="text-zinc-400 font-mono text-xs mt-1">{userProfile.email}</p>
+        <div className="fixed inset-0 z-40 bg-black overflow-y-auto pt-20 pb-24 p-4 sm:p-6">
+          <div className="max-w-md mx-auto space-y-6">
+            <button 
+              onClick={() => setActiveBottomTab('feed')} 
+              className="text-zinc-400 hover:text-white flex items-center gap-2 text-xs font-mono uppercase tracking-wider cursor-pointer"
+            >
+              <ArrowLeft className="w-4 h-4" /> Volver al Feed
+            </button>
+            
+            <div className="flex justify-between items-center">
+              <h2 className="text-white font-sans font-black text-2xl tracking-tight">Mi Perfil</h2>
+              {currentUser && (
+                <button
+                  onClick={handleLogout}
+                  className="text-xs text-red-400 hover:text-red-300 font-mono uppercase tracking-wider bg-red-950/25 border border-red-900/30 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+                >
+                  Cerrar Sesión
+                </button>
+              )}
+            </div>
+
+            {/* Account Card */}
+            <div className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl p-6 flex flex-col items-center text-center space-y-4">
+              <div className="relative">
+                <img 
+                  src={userProfile.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=100'} 
+                  className="w-20 h-20 rounded-full border-2 border-yellow-400/80 object-cover shadow-lg shadow-yellow-400/5" 
+                  referrerPolicy="no-referrer"
+                />
+                <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-yellow-400 rounded-full border-2 border-black flex items-center justify-center text-[10px] font-black text-black">
+                  ★
+                </div>
+              </div>
+              
+              <div className="space-y-1">
+                <h3 className="text-white font-sans font-black text-lg">
+                  {userProfile.displayName || 'Estudiante Invitado'}
+                </h3>
+                <p className="text-zinc-500 font-mono text-xs">
+                  @{userProfile.nickname || 'anonimo'}
+                </p>
+              </div>
+            </div>
+
+            {/* Google Authentication Linking / Register Section */}
+            {(!currentUser || !currentUser.email || currentUser.userId.startsWith('user-') || currentUser.userId === 'anonymous') ? (
+              <div className="bg-gradient-to-br from-zinc-950 to-[#0a0a0b] border border-zinc-900 rounded-2xl p-6 space-y-4 shadow-xl">
+                <div className="space-y-1.5 text-left">
+                  <h3 className="text-yellow-400 font-sans font-bold text-sm tracking-tight flex items-center gap-2">
+                    <Sparkles className="w-4 h-4" /> Vincular Cuenta
+                  </h3>
+                  <p className="text-xs text-zinc-400 leading-relaxed font-sans">
+                    Guarda tu progreso de racha, votos de popularidad e historial de participación del campus de forma permanente vinculando tu cuenta de Google.
+                  </p>
+                </div>
+                
+                <button
+                  type="button"
+                  onClick={handleGoogleSignIn}
+                  className="w-full bg-white hover:bg-zinc-100 text-black font-sans font-bold text-xs py-3.5 px-4 rounded-xl flex items-center justify-center gap-2.5 transition-all duration-200 cursor-pointer shadow-lg shadow-white/5 active:scale-[0.98]"
+                >
+                  <svg className="w-4 h-4" viewBox="0 0 24 24">
+                    <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                    <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                    <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                    <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                  </svg>
+                  Registrarse con Google
+                </button>
+              </div>
+            ) : (
+              <div className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl p-4 flex items-center justify-between text-left">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-green-500/10 border border-green-500/20 flex items-center justify-center text-green-400">
+                    <CheckCircle2 className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="block text-[10px] uppercase font-mono tracking-wider text-zinc-500">Cuenta de Google</span>
+                    <span className="text-xs font-sans text-zinc-300 font-medium">{currentUser.email}</span>
+                  </div>
+                </div>
+                <span className="text-[10px] font-mono text-green-400 bg-green-500/10 px-2 py-0.5 rounded-full border border-green-500/20">
+                  VINCULADA
+                </span>
+              </div>
+            )}
+
+            {/* Profile Fields Editor Form */}
+            <form onSubmit={handleSaveProfileSubmit} className="space-y-5 text-left">
+              <div className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl p-6 space-y-5">
+                <h3 className="text-white font-sans font-bold text-sm tracking-tight border-b border-zinc-900 pb-3">
+                  Editar Datos de Usuario
+                </h3>
+
+                {/* Nombre de usuario */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-black block">
+                    Nombre de Usuario (Nickname)
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 font-mono text-xs">@</span>
+                    <input
+                      type="text"
+                      value={editProfileNickname}
+                      onChange={(e) => setEditProfileNickname(e.target.value)}
+                      placeholder="usuario"
+                      className={`w-full bg-[#0c0c0d] border ${profileErrors.nickname ? 'border-red-500 focus:border-red-500' : 'border-zinc-850 focus:border-yellow-400'} text-xs p-3.5 pl-7 rounded-xl text-zinc-100 outline-none transition-all duration-200 font-sans font-medium`}
+                    />
+                  </div>
+                  {profileErrors.nickname && (
+                    <p className="text-red-500 font-mono text-[9px] mt-0.5 leading-tight">
+                      ⚠️ {profileErrors.nickname}
+                    </p>
+                  )}
+                </div>
+
+                {/* Nombre completo real */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-black block">
+                    Nombre Completo Real
+                  </label>
+                  <input
+                    type="text"
+                    value={editProfileName}
+                    onChange={(e) => setEditProfileName(e.target.value)}
+                    placeholder="Escribe tu nombre completo"
+                    className={`w-full bg-[#0c0c0d] border ${profileErrors.name ? 'border-red-500 focus:border-red-500' : 'border-zinc-850 focus:border-yellow-400'} text-xs p-3.5 rounded-xl text-zinc-100 outline-none transition-all duration-200 font-sans font-medium`}
+                  />
+                  {profileErrors.name && (
+                    <p className="text-red-500 font-mono text-[9px] mt-0.5 leading-tight">
+                      ⚠️ {profileErrors.name}
+                    </p>
+                  )}
+                </div>
+
+                {/* Sexo (Género) */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-black block">
+                    Sexo
+                  </label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setEditProfileSexo('femenino')}
+                      className={`p-3.5 rounded-xl border font-sans font-semibold text-xs transition-all duration-300 flex items-center justify-center gap-2 cursor-pointer ${
+                        editProfileSexo === 'femenino'
+                          ? 'bg-pink-500/10 border-pink-500 text-pink-400 shadow-[0_0_12px_rgba(236,72,153,0.1)]'
+                          : 'bg-[#0c0c0d] border-zinc-850 text-zinc-400 hover:text-white hover:border-zinc-750'
+                      }`}
+                    >
+                      <span className="text-sm">♀</span> Femenino
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditProfileSexo('masculino')}
+                      className={`p-3.5 rounded-xl border font-sans font-semibold text-xs transition-all duration-300 flex items-center justify-center gap-2 cursor-pointer ${
+                        editProfileSexo === 'masculino'
+                          ? 'bg-blue-500/10 border-blue-500 text-blue-400 shadow-[0_0_12px_rgba(59,130,246,0.1)]'
+                          : 'bg-[#0c0c0d] border-zinc-850 text-zinc-400 hover:text-white hover:border-zinc-750'
+                      }`}
+                    >
+                      <span className="text-sm">♂</span> Masculino
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Botón de Guardar */}
+              <button
+                type="submit"
+                disabled={isSavingProfile}
+                className="w-full bg-yellow-400 hover:bg-yellow-350 disabled:bg-zinc-850 disabled:text-zinc-500 text-black font-mono font-black text-xs py-4 rounded-xl transition-all duration-300 uppercase tracking-widest cursor-pointer shadow-lg shadow-yellow-400/10 active:scale-[0.99]"
+              >
+                {isSavingProfile ? 'Guardando...' : 'Guardar Cambios'}
+              </button>
+            </form>
           </div>
         </div>
       )}
