@@ -323,49 +323,22 @@ export default function App() {
     });
 
     const unsubscribeInstitutes = onSnapshot(collection(db, 'centros.educativos'), async (snapshot) => {
-      if (snapshot.empty) {
-        // If the database has no institutions yet, seed it with initial values!
-        try {
-          for (const inst of INITIAL_INSTITUTES) {
-            const docId = inst.id; // Map them to their initial ids '1', '2', '3' so existing records link perfectly
-            const { searchTokens, searchKeywords } = generateSearchArrays(inst.name);
-            const newInstDoc = {
-              anoDeFundacion: null,
-              creadoEn: new Date(),
-              creadoPor: 'system',
-              nombre: inst.name,
-              perfilPhotoUrl: inst.image || 'https://images.unsplash.com/photo-1541339907198-e08756dedf3f?auto=format&fit=crop&q=80&w=300',
-              portadaPhotoUrl: inst.image || 'https://images.unsplash.com/photo-1523050854058-8df90110c9f1?auto=format&fit=crop&q=80&w=1200',
-              redesSociales: {
-                facebook: 'https://web.facebook.com/' + inst.name.toLowerCase().replace(/\s+/g, '')
-              },
-              searchKeywords,
-              searchTokens,
-              tipo: inst.id === '3' ? 'instituto' : inst.id === '2' ? 'colegio' : 'instituto'
-            };
-            await setDoc(doc(db, 'centros.educativos', docId), newInstDoc);
-          }
-        } catch (err) {
-          console.error("Failed to seed initial institutions:", err);
-        }
-      } else {
-        const list: Institute[] = [];
-        snapshot.forEach((snapDoc) => {
-          const data = snapDoc.data();
-          list.push({
-            id: snapDoc.id,
-            name: data.nombre || data.name || '',
-            shortName: data.shortName || (data.nombre ? data.nombre.split(' ').map((w: string) => w[0]).join('').toUpperCase().substring(0, 5) : 'INST'),
-            description: data.description || 'Institución educativa registrada.',
-            image: data.perfilPhotoUrl || data.image || 'https://images.unsplash.com/photo-1541339907198-e08756dedf3f?auto=format&fit=crop&q=80&w=300',
-            location: data.location || 'Sede Principal',
-            studentCount: data.studentCount || 0,
-            popularCategory: data.popularCategory || 'General',
-            ratingAverage: data.ratingAverage || 4.5
-          });
+      const list: Institute[] = [];
+      snapshot.forEach((snapDoc) => {
+        const data = snapDoc.data();
+        list.push({
+          id: snapDoc.id,
+          name: data.nombre || data.name || '',
+          shortName: data.shortName || (data.nombre ? data.nombre.split(' ').map((w: string) => w[0]).join('').toUpperCase().substring(0, 5) : 'INST'),
+          description: data.description || 'Institución educativa registrada.',
+          image: data.perfilPhotoUrl || data.image || 'https://images.unsplash.com/photo-1541339907198-e08756dedf3f?auto=format&fit=crop&q=80&w=300',
+          location: data.location || 'Sede Principal',
+          studentCount: data.studentCount || 0,
+          popularCategory: data.popularCategory || 'General',
+          ratingAverage: data.ratingAverage || 4.5
         });
-        setInstitutes(list);
-      }
+      });
+      setInstitutes(list);
     }, (error) => {
       console.warn("Could not fetch centers (offline or permissions):", error);
     });
@@ -678,11 +651,11 @@ export default function App() {
     if (!selectedProfessorId || !newCrushText.trim() || isSubmittingCrush) return;
     setIsSubmittingCrush(true);
     try {
-      const crushId = 'c_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
+      const authorId = auth.currentUser?.uid || getGuestId();
+      const crushId = authorId;
       const text = newCrushText.trim();
       const timestamp = new Date().toISOString();
       const authorName = currentUser ? currentUser.name : 'Estudiante Anónimo';
-      const authorId = auth.currentUser?.uid || getGuestId();
 
       await setDoc(doc(db, `perfiles/${selectedProfessorId}/crushes`, crushId), {
         text,
@@ -707,11 +680,11 @@ export default function App() {
     if (!selectedProfessorId || !newReviewText.trim() || isSubmittingReview) return;
     setIsSubmittingReview(true);
     try {
-      const reviewId = 'r_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
+      const authorId = auth.currentUser?.uid || getGuestId();
+      const reviewId = authorId;
       const text = newReviewText.trim();
       const timestamp = new Date().toISOString();
       const authorName = currentUser ? currentUser.name : 'Estudiante Anónimo';
-      const authorId = auth.currentUser?.uid || getGuestId();
 
       await setDoc(doc(db, `perfiles/${selectedProfessorId}/reviews`, reviewId), {
         text,
