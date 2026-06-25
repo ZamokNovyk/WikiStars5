@@ -123,7 +123,7 @@ export default function App() {
   const [isSubmittingCrush, setIsSubmittingCrush] = useState(false);
   const [profShips, setProfShips] = useState<any[]>([]);
   const [userVotedShipId, setUserVotedShipId] = useState<string | null>(null);
-  const [userVotes, setUserVotes] = useState<Record<string, { yoTeConozco: boolean; fan: boolean }>>({});
+  const [userVotes, setUserVotes] = useState<Record<string, { yoTeConozco: boolean; fan: boolean; crush: boolean }>>({});
   const [isVotingProf, setIsVotingProf] = useState(false);
   const [globalSearch, setGlobalSearch] = useState<string>('');
   const [studentSearch, setStudentSearch] = useState<string>('');
@@ -368,14 +368,16 @@ export default function App() {
       try {
         const yoRef = doc(db, `perfiles/${selectedProfessorId}/yoTeConozco`, userId);
         const fanRef = doc(db, `perfiles/${selectedProfessorId}/fan`, userId);
+        const crushRef = doc(db, `perfiles/${selectedProfessorId}/crushes`, userId);
         
-        const [yoSnap, fanSnap] = await Promise.all([getDoc(yoRef), getDoc(fanRef)]);
+        const [yoSnap, fanSnap, crushSnap] = await Promise.all([getDoc(yoRef), getDoc(fanRef), getDoc(crushRef)]);
         
         setUserVotes(prev => ({
           ...prev,
           [selectedProfessorId]: {
             yoTeConozco: yoSnap.exists(),
-            fan: fanSnap.exists()
+            fan: fanSnap.exists(),
+            crush: crushSnap.exists()
           }
         }));
       } catch (err) {
@@ -528,36 +530,52 @@ export default function App() {
   const handleVoteProfessorType = async (profId: string, type: 'yoTeConozco' | 'fan') => {
     if (isVotingProf) return;
     const userId = auth.currentUser?.uid || getGuestId();
+    const otherType = type === 'yoTeConozco' ? 'fan' : 'yoTeConozco';
     
-    const currentVotes = userVotes[profId] || { yoTeConozco: false, fan: false };
-    if (currentVotes[type]) {
-      triggerNotice(`¡Ya registraste tu voto de ${type === 'fan' ? 'Fan' : 'Yo te conozco'}!`);
-      return;
-    }
+    const currentVotes = userVotes[profId] || { yoTeConozco: false, fan: false, crush: false };
+    const isCurrentlyVoted = currentVotes[type];
+    const isOtherVoted = currentVotes[otherType];
     
     setIsVotingProf(true);
     try {
       const timestamp = new Date().toISOString();
+      const perfDocRef = doc(db, 'perfiles', profId);
+      const instDocRef = selectedInstituteId ? doc(db, `centros.educativos/${selectedInstituteId}/profesores`, profId) : null;
       
-      // 1. Save in perfiles/{profId}/{type}/{userId}
-      const perfVoteRef = doc(db, `perfiles/${profId}/${type}`, userId);
-      await setDoc(perfVoteRef, { votedAt: timestamp });
-      
-      // 2. Save in centros.educativos/{instId}/profesores/{profId}/{type}/{userId}
-      if (selectedInstituteId) {
-        const instVoteRef = doc(db, `centros.educativos/${selectedInstituteId}/profesores/${profId}/${type}`, userId);
-        await setDoc(instVoteRef, { votedAt: timestamp });
+      // 1. Remove current vote if it exists (for toggle off or switch)
+      if (isCurrentlyVoted) {
+        await deleteDoc(doc(db, `perfiles/${profId}/${type}`, userId));
+        if (selectedInstituteId) {
+          await deleteDoc(doc(db, `centros.educativos/${selectedInstituteId}/profesores/${profId}/${type}`, userId));
+        }
+        await setDoc(perfDocRef, { [type === 'yoTeConozco' ? 'yoTeConozcoCount' : 'fanCount']: increment(-1) }, { merge: true });
+        if (instDocRef) {
+          await setDoc(instDocRef, { [type === 'yoTeConozco' ? 'yoTeConozcoCount' : 'fanCount']: increment(-1) }, { merge: true });
+        }
       }
       
-      // 3. Increment counters in both perfiles/{profId} and centros.educativos/{instId}/profesores/{profId}
-      const perfDocRef = doc(db, 'perfiles', profId);
-      const counterField = type === 'yoTeConozco' ? 'yoTeConozcoCount' : 'fanCount';
+      // 2. Remove other vote if it exists (for switch)
+      if (isOtherVoted) {
+        await deleteDoc(doc(db, `perfiles/${profId}/${otherType}`, userId));
+        if (selectedInstituteId) {
+          await deleteDoc(doc(db, `centros.educativos/${selectedInstituteId}/profesores/${profId}/${otherType}`, userId));
+        }
+        await setDoc(perfDocRef, { [otherType === 'yoTeConozco' ? 'yoTeConozcoCount' : 'fanCount']: increment(-1) }, { merge: true });
+        if (instDocRef) {
+          await setDoc(instDocRef, { [otherType === 'yoTeConozco' ? 'yoTeConozcoCount' : 'fanCount']: increment(-1) }, { merge: true });
+        }
+      }
       
-      await setDoc(perfDocRef, { [counterField]: increment(1) }, { merge: true });
-      
-      if (selectedInstituteId) {
-        const instDocRef = doc(db, `centros.educativos/${selectedInstituteId}/profesores`, profId);
-        await setDoc(instDocRef, { [counterField]: increment(1) }, { merge: true });
+      // 3. Add new vote if it was toggle on or switch
+      if (!isCurrentlyVoted) {
+        await setDoc(doc(db, `perfiles/${profId}/${type}`, userId), { votedAt: timestamp });
+        if (selectedInstituteId) {
+          await setDoc(doc(db, `centros.educativos/${selectedInstituteId}/profesores/${profId}/${type}`, userId), { votedAt: timestamp });
+        }
+        await setDoc(perfDocRef, { [type === 'yoTeConozco' ? 'yoTeConozcoCount' : 'fanCount']: increment(1) }, { merge: true });
+        if (instDocRef) {
+          await setDoc(instDocRef, { [type === 'yoTeConozco' ? 'yoTeConozcoCount' : 'fanCount']: increment(1) }, { merge: true });
+        }
       }
       
       // Update local votes state
@@ -565,18 +583,65 @@ export default function App() {
         ...prev,
         [profId]: {
           ...prev[profId],
-          [type]: true
+          [type]: !isCurrentlyVoted,
+          [otherType]: false // Always false because either it was removed or we toggled the current one
         }
       }));
       
-      pushSocialLog(type === 'fan' 
-        ? `❤️ ¡Eres Fan de un docente del campus!` 
-        : `👥 ¡Confirmaste que conoces a un docente!`
-      );
-      triggerNotice('¡Voto registrado exitosamente!');
+      triggerNotice(isCurrentlyVoted ? '¡Voto retirado!' : '¡Voto registrado!');
     } catch (error) {
       console.error("Error voting:", error);
       triggerNotice('Hubo un error al registrar tu voto.');
+    } finally {
+      setIsVotingProf(false);
+    }
+  };
+
+  const handleToggleCrush = async (profId: string) => {
+    if (isVotingProf) return;
+    const userId = auth.currentUser?.uid || getGuestId();
+    
+    const hasCrush = (userVotes[profId] || { crush: false }).crush;
+    
+    setIsVotingProf(true);
+    try {
+      const timestamp = new Date().toISOString();
+      const perfCrushRef = doc(db, `perfiles/${profId}/crushes`, userId);
+      const perfDocRef = doc(db, 'perfiles', profId);
+
+      if (hasCrush) {
+        // Remove crush
+        await deleteDoc(perfCrushRef);
+        if (selectedInstituteId) {
+          await deleteDoc(doc(db, `centros.educativos/${selectedInstituteId}/profesores/${profId}/crushes`, userId));
+        }
+        await setDoc(perfDocRef, { crushesCount: increment(-1) }, { merge: true });
+        if (selectedInstituteId) {
+          await setDoc(doc(db, `centros.educativos/${selectedInstituteId}/profesores`, profId), { crushesCount: increment(-1) }, { merge: true });
+        }
+      } else {
+        // Add crush
+        await setDoc(perfCrushRef, { votedAt: timestamp });
+        if (selectedInstituteId) {
+          await setDoc(doc(db, `centros.educativos/${selectedInstituteId}/profesores/${profId}/crushes`, userId), { votedAt: timestamp });
+        }
+        await setDoc(perfDocRef, { crushesCount: increment(1) }, { merge: true });
+        if (selectedInstituteId) {
+          await setDoc(doc(db, `centros.educativos/${selectedInstituteId}/profesores`, profId), { crushesCount: increment(1) }, { merge: true });
+        }
+      }
+      
+      setUserVotes(prev => ({
+        ...prev,
+        [profId]: {
+          ...prev[profId],
+          crush: !hasCrush
+        }
+      }));
+      triggerNotice(hasCrush ? '¡Crush eliminado!' : '¡Crush registrado!');
+    } catch (error) {
+      console.error("Error toggling crush:", error);
+      triggerNotice('Hubo un error al registrar tu crush.');
     } finally {
       setIsVotingProf(false);
     }
@@ -3065,16 +3130,19 @@ export default function App() {
                       <button
                         onClick={() => handleVoteProfessorType(currentSelectedProfessor.id, 'yoTeConozco')}
                         disabled={isVotingProf}
-                        className={`p-6 rounded-2xl border text-center transition-all duration-300 relative group flex flex-col justify-between h-48 cursor-pointer w-full text-left outline-none ${
+                        className={`p-6 rounded-2xl border text-center transition-all duration-300 relative group flex flex-col justify-between items-center h-48 cursor-pointer w-full outline-none ${
                           hasVoted
                             ? 'bg-yellow-400/5 border-yellow-400/50 shadow-[0_4px_20px_rgba(250,204,21,0.05)]'
                             : 'bg-zinc-950/60 border-zinc-900 hover:border-yellow-400/30 hover:bg-[#121214]/60'
                         }`}
                       >
+                        {/* Name - NEW */}
+                        <span className="text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-widest truncate w-full px-1">
+                          {currentSelectedProfessor.name}
+                        </span>
                         {/* Icon */}
-                        <div className="flex justify-between items-start w-full">
-                          <span className="text-[10px] font-mono font-black text-zinc-500 uppercase tracking-widest">CATEGORÍA 1</span>
-                          <Users className={`w-5 h-5 ${hasVoted ? 'text-yellow-400' : 'text-zinc-600 group-hover:text-yellow-400 transition-colors'}`} />
+                        <div className="flex justify-center items-center w-full">
+                          <Users className="w-5 h-5 text-yellow-400" />
                         </div>
 
                         {/* Large count */}
@@ -3082,15 +3150,8 @@ export default function App() {
                           <span className={`text-4xl font-display font-black block tracking-tight ${hasVoted ? 'text-yellow-400' : 'text-white'}`}>
                             {currentSelectedProfessor.yoTeConozcoCount || 0}
                           </span>
-                        </div>
-
-                        {/* Bottom text */}
-                        <div className="w-full text-center">
-                          <span className="text-xs font-mono font-black tracking-wider uppercase text-zinc-300 block">
-                            {hasVoted ? '✓ YO TE CONOZCO (Votado)' : 'YO TE CONOZCO'}
-                          </span>
-                          <span className="text-[9px] font-mono font-medium text-zinc-550 uppercase block mt-1">
-                            {hasVoted ? 'Has confirmado que fue tu docente' : 'Haz clic para registrar voto'}
+                          <span className={`text-[10px] font-mono font-bold uppercase tracking-widest mt-1 block ${hasVoted ? 'text-yellow-400/80' : 'text-zinc-500'}`}>
+                            Yo te conozco
                           </span>
                         </div>
                       </button>
@@ -3104,16 +3165,19 @@ export default function App() {
                       <button
                         onClick={() => handleVoteProfessorType(currentSelectedProfessor.id, 'fan')}
                         disabled={isVotingProf}
-                        className={`p-6 rounded-2xl border text-center transition-all duration-300 relative group flex flex-col justify-between h-48 cursor-pointer w-full text-left outline-none ${
+                        className={`p-6 rounded-2xl border text-center transition-all duration-300 relative group flex flex-col justify-between items-center h-48 cursor-pointer w-full outline-none ${
                           hasVoted
                             ? 'bg-red-500/5 border-red-500/50 shadow-[0_4px_20px_rgba(239,68,68,0.05)]'
                             : 'bg-zinc-950/60 border-zinc-900 hover:border-red-500/30 hover:bg-[#121214]/60'
                         }`}
                       >
+                        {/* Name - NEW */}
+                        <span className="text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-widest truncate w-full px-1">
+                          {currentSelectedProfessor.name}
+                        </span>
                         {/* Icon */}
-                        <div className="flex justify-between items-start w-full">
-                          <span className="text-[10px] font-mono font-black text-zinc-500 uppercase tracking-widest">CATEGORÍA 2</span>
-                          <Heart className={`w-5 h-5 ${hasVoted ? 'text-red-500 fill-current' : 'text-zinc-600 group-hover:text-red-500 transition-colors'}`} />
+                        <div className="flex justify-center items-center w-full">
+                          <Heart className="w-5 h-5 text-red-600 fill-current" />
                         </div>
 
                         {/* Large count */}
@@ -3121,15 +3185,8 @@ export default function App() {
                           <span className={`text-4xl font-display font-black block tracking-tight ${hasVoted ? 'text-red-500' : 'text-white'}`}>
                             {currentSelectedProfessor.fanCount || 0}
                           </span>
-                        </div>
-
-                        {/* Bottom text */}
-                        <div className="w-full text-center">
-                          <span className="text-xs font-mono font-black tracking-wider uppercase text-zinc-300 block">
-                            {hasVoted ? '❤️ ¡ERES FAN! (Registrado)' : 'FAN'}
-                          </span>
-                          <span className="text-[9px] font-mono font-medium text-zinc-550 uppercase block mt-1">
-                            {hasVoted ? 'Tu admiración ha sido guardada' : 'Haz clic para sumarte como fan'}
+                          <span className={`text-[10px] font-mono font-bold uppercase tracking-widest mt-1 block ${hasVoted ? 'text-red-500/80' : 'text-zinc-500'}`}>
+                            Fan
                           </span>
                         </div>
                       </button>
@@ -3293,6 +3350,34 @@ export default function App() {
                 {/* Tab content 3: Crushes */}
                 {activeProfSubTab === 'Crushes' && (
                   <div className="mt-8 max-w-2xl mx-auto text-left space-y-6">
+                    {/* Crush Voting Toggle */}
+                    {(() => {
+                      const hasCrush = (userVotes[currentSelectedProfessor.id] || { crush: false }).crush;
+                      return (
+                        <div className="bg-[#121214]/60 border border-zinc-900 rounded-2xl p-8 text-center space-y-4">
+                          <h3 className="font-display font-black text-lg text-white">¿ES TU AMOR SECRETO?</h3>
+                          <button
+                            onClick={() => handleToggleCrush(currentSelectedProfessor.id)}
+                            disabled={isVotingProf}
+                            className={`mx-auto p-4 rounded-full transition-all duration-300 ${hasCrush ? 'bg-pink-500/20' : 'bg-zinc-900'}`}
+                          >
+                            <Heart className={`w-12 h-12 ${hasCrush ? 'text-pink-500 fill-current' : 'text-zinc-600'}`} />
+                          </button>
+                          <p className="text-sm text-zinc-400 font-mono">
+                            {hasCrush ? '¡Le has dado un crush!' : '¿Sientes una conexión especial?'}
+                          </p>
+                          <div className="text-center">
+                            <span className="text-3xl font-display font-black block text-white">
+                              {currentSelectedProfessor.crushesCount || 0}
+                            </span>
+                            <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-500">
+                              CRUSHES TOTALES
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
                     {/* Add Crush Form */}
                     <form onSubmit={handleSubmitCrush} className="bg-[#121214]/60 border border-zinc-900 rounded-2xl p-6 space-y-4">
                       <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
