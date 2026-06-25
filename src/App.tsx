@@ -202,10 +202,9 @@ export default function App() {
   const [editWikiAltura, setEditWikiAltura] = useState('');
   const [editWikiPeso, setEditWikiPeso] = useState('');
   const [editWikiEstadoCivil, setEditWikiEstadoCivil] = useState('');
-  const [editWikiFacultad, setEditWikiFacultad] = useState('');
-  const [editWikiTrayectoria, setEditWikiTrayectoria] = useState('');
-  const [editWikiExigencia, setEditWikiExigencia] = useState('');
-  const [editWikiMetodo, setEditWikiMetodo] = useState('');
+  const [editWikiDay, setEditWikiDay] = useState('');
+  const [editWikiMonth, setEditWikiMonth] = useState('');
+  const [editWikiYear, setEditWikiYear] = useState('');
   const [isSubmittingWiki, setIsSubmittingWiki] = useState(false);
 
   // PWA installation state & handlers
@@ -830,15 +829,87 @@ export default function App() {
   const handleOpenEditWiki = () => {
     if (!currentSelectedProfessor) return;
     setEditWikiEdad(currentSelectedProfessor.edad || '');
-    setEditWikiAltura(currentSelectedProfessor.altura || '');
-    setEditWikiPeso(currentSelectedProfessor.peso || '');
+    
+    // Parse height (altura) to match "X cm" dropdown
+    let heightVal = currentSelectedProfessor.altura || '';
+    if (heightVal) {
+      const match = heightVal.match(/\d+(\.\d+)?/);
+      if (match) {
+        let num = parseFloat(match[0]);
+        if (num <= 3) {
+          // It's in meters, convert to cm, e.g., 1.75 -> 175
+          num = Math.round(num * 100);
+        }
+        if (num >= 100 && num <= 200) {
+          heightVal = `${Math.round(num)} cm`;
+        }
+      }
+    }
+    setEditWikiAltura(heightVal);
+
+    // Parse weight (peso) to match "X kg" dropdown
+    let weightVal = currentSelectedProfessor.peso || '';
+    if (weightVal) {
+      const match = weightVal.match(/\d+/);
+      if (match) {
+        const num = parseInt(match[0], 10);
+        if (num >= 40 && num <= 100) {
+          weightVal = `${num} kg`;
+        }
+      }
+    }
+    setEditWikiPeso(weightVal);
+
+    // Marital Status
     setEditWikiEstadoCivil(currentSelectedProfessor.estadoCivil || '');
-    setEditWikiFacultad(currentSelectedProfessor.facultad || 'Educación y Ciencias');
-    setEditWikiTrayectoria(currentSelectedProfessor.trayectoria || '10+ Años en Docencia');
-    setEditWikiExigencia(currentSelectedProfessor.exigencia || 'Alto (Valora Esfuerzo)');
-    setEditWikiMetodo(currentSelectedProfessor.metodo || 'Dinámico y Práctico');
+    
+    // Birthday dropdowns
+    setEditWikiDay(currentSelectedProfessor.birthDay || '');
+    setEditWikiMonth(currentSelectedProfessor.birthMonth || '');
+    setEditWikiYear(currentSelectedProfessor.birthYear || '');
+    
     setIsEditWikiModalOpen(true);
   };
+
+  const calculateAgeStr = (dayStr: string, monthStr: string, yearStr: string) => {
+    if (!dayStr || !monthStr || !yearStr) return 'No especificada';
+    const day = parseInt(dayStr, 10);
+    const month = parseInt(monthStr, 10);
+    const year = parseInt(yearStr, 10);
+    
+    const today = new Date();
+    let age = today.getFullYear() - year;
+    const m = (today.getMonth() + 1) - month;
+    if (m < 0 || (m === 0 && today.getDate() < day)) {
+      age--;
+    }
+    return age >= 0 ? `${age} años` : 'No especificada';
+  };
+
+  const getDaysInMonth = (yearStr: string, monthStr: string) => {
+    if (!monthStr) return 31;
+    const month = parseInt(monthStr, 10);
+    if (month === 2) {
+      if (yearStr) {
+        const year = parseInt(yearStr, 10);
+        const isLeap = (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0);
+        return isLeap ? 29 : 28;
+      }
+      return 29;
+    }
+    if ([4, 6, 9, 11].includes(month)) return 30;
+    return 31;
+  };
+
+  useEffect(() => {
+    if (editWikiDay && editWikiMonth) {
+      const maxDays = getDaysInMonth(editWikiYear, editWikiMonth);
+      const dayVal = parseInt(editWikiDay, 10);
+      if (dayVal > maxDays) {
+        setEditWikiDay(String(maxDays));
+      }
+    }
+  }, [editWikiYear, editWikiMonth, editWikiDay]);
 
   const handleSubmitWiki = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -848,15 +919,16 @@ export default function App() {
       const profDocRef = doc(db, 'centros.educativos', selectedInstituteId, 'profesores', selectedProfessorId);
       const perfDocRef = doc(db, 'perfiles', selectedProfessorId);
       
+      const computedAge = calculateAgeStr(editWikiDay, editWikiMonth, editWikiYear);
+      
       const updateData = {
-        edad: editWikiEdad.trim(),
-        altura: editWikiAltura.trim(),
-        peso: editWikiPeso.trim(),
-        estadoCivil: editWikiEstadoCivil.trim(),
-        facultad: editWikiFacultad.trim(),
-        trayectoria: editWikiTrayectoria.trim(),
-        exigencia: editWikiExigencia.trim(),
-        metodo: editWikiMetodo.trim()
+        edad: computedAge,
+        birthDay: editWikiDay,
+        birthMonth: editWikiMonth,
+        birthYear: editWikiYear,
+        altura: editWikiAltura,
+        peso: editWikiPeso,
+        estadoCivil: editWikiEstadoCivil
       };
       
       await runTransaction(db, async (transaction) => {
@@ -3676,11 +3748,12 @@ export default function App() {
                 {/* Tab content 2: Wiki */}
                 {activeProfSubTab === 'Wiki' && (
                   <div className="mt-8 max-w-2xl mx-auto text-left space-y-6">
+                    {/* Biografia / Datos Personales */}
                     <div className="bg-[#121214]/60 border border-zinc-900 rounded-2xl p-6 space-y-4">
                       <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
                         <div className="flex items-center gap-2">
-                          <BookOpen className="w-4 h-4 text-yellow-400" />
-                          <h3 className="font-display font-black text-sm text-white uppercase tracking-wider">INFORMACIÓN GENERAL Y TRAYECTORIA</h3>
+                          <User className="w-4 h-4 text-yellow-400" />
+                          <h3 className="font-display font-black text-sm text-white uppercase tracking-wider">DATOS BIOGRÁFICOS (WIKI)</h3>
                         </div>
                         <button
                           onClick={handleOpenEditWiki}
@@ -3689,40 +3762,6 @@ export default function App() {
                           <Edit2 className="w-3.5 h-3.5" />
                           <span>Editar Wiki</span>
                         </button>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4 text-xs font-mono">
-                        <div>
-                          <span className="text-zinc-500 block uppercase text-[10px]">FACULTAD / CENTRO</span>
-                          <span className="text-zinc-200 uppercase font-black">
-                            {currentSelectedProfessor.facultad || 'Educación y Ciencias'}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-zinc-500 block uppercase text-[10px]">TRAYECTORIA ACADÉMICA</span>
-                          <span className="text-zinc-200 uppercase font-black">
-                            {currentSelectedProfessor.trayectoria || '10+ Años en Docencia'}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-zinc-500 block uppercase text-[10px]">NIVEL DE EXIGENCIA</span>
-                          <span className="text-yellow-400 uppercase font-black">
-                            {currentSelectedProfessor.exigencia || 'Alto (Valora Esfuerzo)'}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-zinc-500 block uppercase text-[10px]">MÉTODO DE ENSEÑANZA</span>
-                          <span className="text-zinc-200 uppercase font-black">
-                            {currentSelectedProfessor.metodo || 'Dinámico y Práctico'}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Biografia / Datos Personales */}
-                    <div className="bg-[#121214]/60 border border-zinc-900 rounded-2xl p-6 space-y-4">
-                      <div className="flex items-center gap-2 border-b border-zinc-900 pb-3">
-                        <User className="w-4 h-4 text-yellow-400" />
-                        <h3 className="font-display font-black text-sm text-white uppercase tracking-wider">DATOS BIOGRÁFICOS (WIKI)</h3>
                       </div>
                       <div className="grid grid-cols-2 gap-4 text-xs font-mono">
                         <div>
@@ -4609,97 +4648,105 @@ export default function App() {
               </div>
 
               <form onSubmit={handleSubmitWiki} className="space-y-4 pt-2">
-                <div className="border-b border-zinc-900 pb-2 mb-2">
-                  <h4 className="text-[10px] font-mono font-black uppercase text-yellow-400 tracking-wider">Información General</h4>
-                </div>
-                
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-black block">Facultad / Centro</label>
-                    <input
-                      type="text"
-                      value={editWikiFacultad}
-                      onChange={(e) => setEditWikiFacultad(e.target.value)}
-                      placeholder="Ej. Educación y Ciencias"
-                      className="w-full bg-[#0d0d0d] focus:bg-[#121212] border border-zinc-900 focus:border-yellow-400 text-xs p-3.5 rounded-xl text-zinc-100 outline-none transition-all duration-200 font-sans font-medium placeholder-zinc-700"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-black block">Trayectoria Académica</label>
-                    <input
-                      type="text"
-                      value={editWikiTrayectoria}
-                      onChange={(e) => setEditWikiTrayectoria(e.target.value)}
-                      placeholder="Ej. 10+ Años en Docencia"
-                      className="w-full bg-[#0d0d0d] focus:bg-[#121212] border border-zinc-900 focus:border-yellow-400 text-xs p-3.5 rounded-xl text-zinc-100 outline-none transition-all duration-200 font-sans font-medium placeholder-zinc-700"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-black block">Nivel de Exigencia</label>
-                    <input
-                      type="text"
-                      value={editWikiExigencia}
-                      onChange={(e) => setEditWikiExigencia(e.target.value)}
-                      placeholder="Ej. Alto (Valora Esfuerzo)"
-                      className="w-full bg-[#0d0d0d] focus:bg-[#121212] border border-zinc-900 focus:border-yellow-400 text-xs p-3.5 rounded-xl text-zinc-100 outline-none transition-all duration-200 font-sans font-medium placeholder-zinc-700"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-black block">Método de Enseñanza</label>
-                    <input
-                      type="text"
-                      value={editWikiMetodo}
-                      onChange={(e) => setEditWikiMetodo(e.target.value)}
-                      placeholder="Ej. Dinámico y Práctico"
-                      className="w-full bg-[#0d0d0d] focus:bg-[#121212] border border-zinc-900 focus:border-yellow-400 text-xs p-3.5 rounded-xl text-zinc-100 outline-none transition-all duration-200 font-sans font-medium placeholder-zinc-700"
-                    />
-                  </div>
-                </div>
+                  {/* Fecha de Nacimiento (Edad) */}
+                  <div className="space-y-1.5 col-span-1 sm:col-span-2">
+                    <label className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-black block">Fecha de Nacimiento (Edad)</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {/* Año */}
+                      <select
+                        value={editWikiYear}
+                        onChange={(e) => setEditWikiYear(e.target.value)}
+                        className="w-full bg-[#0d0d0d] focus:bg-[#121212] border border-zinc-900 focus:border-yellow-400 text-xs p-3.5 rounded-xl text-zinc-100 outline-none transition-all duration-200 font-sans font-medium cursor-pointer"
+                      >
+                        <option value="">Año</option>
+                        {Array.from({ length: 2026 - 1960 + 1 }, (_, i) => 2026 - i).map((y) => (
+                          <option key={y} value={y}>{y}</option>
+                        ))}
+                      </select>
 
-                <div className="border-b border-zinc-900 pb-2 pt-2 mb-2">
-                  <h4 className="text-[10px] font-mono font-black uppercase text-yellow-400 tracking-wider">Datos Biográficos</h4>
-                </div>
+                      {/* Mes */}
+                      <select
+                        value={editWikiMonth}
+                        onChange={(e) => setEditWikiMonth(e.target.value)}
+                        className="w-full bg-[#0d0d0d] focus:bg-[#121212] border border-zinc-900 focus:border-yellow-400 text-xs p-3.5 rounded-xl text-zinc-100 outline-none transition-all duration-200 font-sans font-medium cursor-pointer"
+                      >
+                        <option value="">Mes</option>
+                        {[
+                          { value: '1', label: 'Enero' },
+                          { value: '2', label: 'Febrero' },
+                          { value: '3', label: 'Marzo' },
+                          { value: '4', label: 'Abril' },
+                          { value: '5', label: 'Mayo' },
+                          { value: '6', label: 'Junio' },
+                          { value: '7', label: 'Julio' },
+                          { value: '8', label: 'Agosto' },
+                          { value: '9', label: 'Septiembre' },
+                          { value: '10', label: 'Octubre' },
+                          { value: '11', label: 'Noviembre' },
+                          { value: '12', label: 'Diciembre' },
+                        ].map((m) => (
+                          <option key={m.value} value={m.value}>{m.label}</option>
+                        ))}
+                      </select>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-black block">Edad</label>
-                    <input
-                      type="text"
-                      value={editWikiEdad}
-                      onChange={(e) => setEditWikiEdad(e.target.value)}
-                      placeholder="Ej. 42 años"
-                      className="w-full bg-[#0d0d0d] focus:bg-[#121212] border border-zinc-900 focus:border-yellow-400 text-xs p-3.5 rounded-xl text-zinc-100 outline-none transition-all duration-200 font-sans font-medium placeholder-zinc-700"
-                    />
+                      {/* Día */}
+                      <select
+                        value={editWikiDay}
+                        onChange={(e) => setEditWikiDay(e.target.value)}
+                        className="w-full bg-[#0d0d0d] focus:bg-[#121212] border border-zinc-900 focus:border-yellow-400 text-xs p-3.5 rounded-xl text-zinc-100 outline-none transition-all duration-200 font-sans font-medium cursor-pointer"
+                      >
+                        <option value="">Día</option>
+                        {Array.from({ length: getDaysInMonth(editWikiYear, editWikiMonth) }, (_, i) => i + 1).map((d) => (
+                          <option key={d} value={d}>{d}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
+
+                  {/* Altura */}
                   <div className="space-y-1.5">
                     <label className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-black block">Altura</label>
-                    <input
-                      type="text"
+                    <select
                       value={editWikiAltura}
                       onChange={(e) => setEditWikiAltura(e.target.value)}
-                      placeholder="Ej. 1.75 m"
-                      className="w-full bg-[#0d0d0d] focus:bg-[#121212] border border-zinc-900 focus:border-yellow-400 text-xs p-3.5 rounded-xl text-zinc-100 outline-none transition-all duration-200 font-sans font-medium placeholder-zinc-700"
-                    />
+                      className="w-full bg-[#0d0d0d] focus:bg-[#121212] border border-zinc-900 focus:border-yellow-400 text-xs p-3.5 rounded-xl text-zinc-100 outline-none transition-all duration-200 font-sans font-medium cursor-pointer"
+                    >
+                      <option value="">No especificada</option>
+                      {Array.from({ length: 200 - 100 + 1 }, (_, i) => 200 - i).map((h) => (
+                        <option key={h} value={`${h} cm`}>{h} cm</option>
+                      ))}
+                    </select>
                   </div>
+
+                  {/* Peso */}
                   <div className="space-y-1.5">
                     <label className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-black block">Peso</label>
-                    <input
-                      type="text"
+                    <select
                       value={editWikiPeso}
                       onChange={(e) => setEditWikiPeso(e.target.value)}
-                      placeholder="Ej. 70 kg"
-                      className="w-full bg-[#0d0d0d] focus:bg-[#121212] border border-zinc-900 focus:border-yellow-400 text-xs p-3.5 rounded-xl text-zinc-100 outline-none transition-all duration-200 font-sans font-medium placeholder-zinc-700"
-                    />
+                      className="w-full bg-[#0d0d0d] focus:bg-[#121212] border border-zinc-900 focus:border-yellow-400 text-xs p-3.5 rounded-xl text-zinc-100 outline-none transition-all duration-200 font-sans font-medium cursor-pointer"
+                    >
+                      <option value="">No especificado</option>
+                      {Array.from({ length: 100 - 40 + 1 }, (_, i) => 100 - i).map((w) => (
+                        <option key={w} value={`${w} kg`}>{w} kg</option>
+                      ))}
+                    </select>
                   </div>
-                  <div className="space-y-1.5">
+
+                  {/* Estado Civil */}
+                  <div className="space-y-1.5 col-span-1 sm:col-span-2">
                     <label className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-black block">Estado Civil</label>
-                    <input
-                      type="text"
+                    <select
                       value={editWikiEstadoCivil}
                       onChange={(e) => setEditWikiEstadoCivil(e.target.value)}
-                      placeholder="Ej. Casado(a)"
-                      className="w-full bg-[#0d0d0d] focus:bg-[#121212] border border-zinc-900 focus:border-yellow-400 text-xs p-3.5 rounded-xl text-zinc-100 outline-none transition-all duration-200 font-sans font-medium placeholder-zinc-700"
-                    />
+                      className="w-full bg-[#0d0d0d] focus:bg-[#121212] border border-zinc-900 focus:border-yellow-400 text-xs p-3.5 rounded-xl text-zinc-100 outline-none transition-all duration-200 font-sans font-medium cursor-pointer"
+                    >
+                      <option value="">No especificado</option>
+                      {['Soltero/a', 'Divorciado/a', 'Casado/a', 'Viudo/a', 'Con Novio/a'].map((st) => (
+                        <option key={st} value={st}>{st}</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
 
