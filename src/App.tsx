@@ -45,7 +45,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Institute, Alumno, AlumnoComment } from './types';
 import { INITIAL_INSTITUTES, INITIAL_ALUMNOS, INITIAL_COMMENTS } from './data';
 import { db, auth, handleFirestoreError, OperationType } from './firebase';
-import { collection, doc, setDoc, getDoc, onSnapshot, serverTimestamp, increment } from 'firebase/firestore';
+import { collection, doc, setDoc, getDoc, onSnapshot, serverTimestamp, increment, runTransaction } from 'firebase/firestore';
 import { GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 
 function generateDocId(rawName: string) {
@@ -538,45 +538,47 @@ export default function App() {
     
     setIsVotingProf(true);
     try {
-      const timestamp = new Date().toISOString();
-      const perfDocRef = doc(db, 'perfiles', profId);
-      const instDocRef = selectedInstituteId ? doc(db, `centros.educativos/${selectedInstituteId}/profesores`, profId) : null;
-      
-      // 1. Remove current vote if it exists (for toggle off or switch)
-      if (isCurrentlyVoted) {
-        await deleteDoc(doc(db, `perfiles/${profId}/${type}`, userId));
-        if (selectedInstituteId) {
-          await deleteDoc(doc(db, `centros.educativos/${selectedInstituteId}/profesores/${profId}/${type}`, userId));
+      await runTransaction(db, async (transaction) => {
+        const timestamp = new Date().toISOString();
+        const perfDocRef = doc(db, 'perfiles', profId);
+        const instDocRef = selectedInstituteId ? doc(db, `centros.educativos/${selectedInstituteId}/profesores`, profId) : null;
+        
+        // 1. If currently voted, remove it
+        if (isCurrentlyVoted) {
+          transaction.delete(doc(db, `perfiles/${profId}/${type}`, userId));
+          if (instDocRef) {
+            transaction.delete(doc(db, `centros.educativos/${selectedInstituteId}/profesores/${profId}/${type}`, userId));
+          }
+          transaction.set(perfDocRef, { [type === 'yoTeConozco' ? 'yoTeConozcoCount' : 'fanCount']: increment(-1) }, { merge: true });
+          if (instDocRef) {
+            transaction.set(instDocRef, { [type === 'yoTeConozco' ? 'yoTeConozcoCount' : 'fanCount']: increment(-1) }, { merge: true });
+          }
         }
-        await setDoc(perfDocRef, { [type === 'yoTeConozco' ? 'yoTeConozcoCount' : 'fanCount']: increment(-1) }, { merge: true });
-        if (instDocRef) {
-          await setDoc(instDocRef, { [type === 'yoTeConozco' ? 'yoTeConozcoCount' : 'fanCount']: increment(-1) }, { merge: true });
+        
+        // 2. If other voted, remove it
+        if (isOtherVoted) {
+          transaction.delete(doc(db, `perfiles/${profId}/${otherType}`, userId));
+          if (instDocRef) {
+            transaction.delete(doc(db, `centros.educativos/${selectedInstituteId}/profesores/${profId}/${otherType}`, userId));
+          }
+          transaction.set(perfDocRef, { [otherType === 'yoTeConozco' ? 'yoTeConozcoCount' : 'fanCount']: increment(-1) }, { merge: true });
+          if (instDocRef) {
+            transaction.set(instDocRef, { [otherType === 'yoTeConozco' ? 'yoTeConozcoCount' : 'fanCount']: increment(-1) }, { merge: true });
+          }
         }
-      }
-      
-      // 2. Remove other vote if it exists (for switch)
-      if (isOtherVoted) {
-        await deleteDoc(doc(db, `perfiles/${profId}/${otherType}`, userId));
-        if (selectedInstituteId) {
-          await deleteDoc(doc(db, `centros.educativos/${selectedInstituteId}/profesores/${profId}/${otherType}`, userId));
+        
+        // 3. If it was NOT currently voted, add it (this handles both toggling ON and switching from other)
+        if (!isCurrentlyVoted) {
+          transaction.set(doc(db, `perfiles/${profId}/${type}`, userId), { votedAt: timestamp });
+          if (instDocRef) {
+            transaction.set(doc(db, `centros.educativos/${selectedInstituteId}/profesores/${profId}/${type}`, userId), { votedAt: timestamp });
+          }
+          transaction.set(perfDocRef, { [type === 'yoTeConozco' ? 'yoTeConozcoCount' : 'fanCount']: increment(1) }, { merge: true });
+          if (instDocRef) {
+            transaction.set(instDocRef, { [type === 'yoTeConozco' ? 'yoTeConozcoCount' : 'fanCount']: increment(1) }, { merge: true });
+          }
         }
-        await setDoc(perfDocRef, { [otherType === 'yoTeConozco' ? 'yoTeConozcoCount' : 'fanCount']: increment(-1) }, { merge: true });
-        if (instDocRef) {
-          await setDoc(instDocRef, { [otherType === 'yoTeConozco' ? 'yoTeConozcoCount' : 'fanCount']: increment(-1) }, { merge: true });
-        }
-      }
-      
-      // 3. Add new vote if it was toggle on or switch
-      if (!isCurrentlyVoted) {
-        await setDoc(doc(db, `perfiles/${profId}/${type}`, userId), { votedAt: timestamp });
-        if (selectedInstituteId) {
-          await setDoc(doc(db, `centros.educativos/${selectedInstituteId}/profesores/${profId}/${type}`, userId), { votedAt: timestamp });
-        }
-        await setDoc(perfDocRef, { [type === 'yoTeConozco' ? 'yoTeConozcoCount' : 'fanCount']: increment(1) }, { merge: true });
-        if (instDocRef) {
-          await setDoc(instDocRef, { [type === 'yoTeConozco' ? 'yoTeConozcoCount' : 'fanCount']: increment(1) }, { merge: true });
-        }
-      }
+      });
       
       // Update local votes state
       setUserVotes(prev => ({
@@ -584,7 +586,7 @@ export default function App() {
         [profId]: {
           ...prev[profId],
           [type]: !isCurrentlyVoted,
-          [otherType]: false // Always false because either it was removed or we toggled the current one
+          [otherType]: false 
         }
       }));
       
