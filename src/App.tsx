@@ -2430,12 +2430,6 @@ export default function App() {
                         <div className="absolute top-4 left-4 bg-black/90 backdrop-blur-md border border-yellow-400/25 text-yellow-400 text-[10px] font-mono font-black px-2.5 py-1 rounded-lg shadow-lg uppercase tracking-wider">
                           ★ {inst.shortName}
                         </div>
-
-                        {/* Average stars */}
-                        <div className="absolute bottom-4 right-4 bg-yellow-400 text-black text-[10px] font-mono font-black px-2.5 py-1 rounded-full flex items-center gap-1 shadow-xl shadow-black/80">
-                          <Star className="w-3 h-3 fill-current" />
-                          <span>{inst.ratingAverage}</span>
-                        </div>
                       </div>
 
                       {/* Info body */}
@@ -4551,7 +4545,7 @@ export default function App() {
 
       {/* Floating Action Button for registering institutions, only shown on main screen */}
       {!selectedInstituteId && !selectedAlumnoId && (
-        <div className="fixed bottom-6 right-6 z-40">
+        <div className="fixed bottom-24 right-6 z-40">
           <motion.button
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
