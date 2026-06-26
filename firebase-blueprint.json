@@ -93,9 +93,11 @@
         "universidades": { "type": "number" },
         "colegios": { "type": "number" },
         "usuarios_anonimos": { "type": "number" },
-        "usuarios_google": { "type": "number" }
+        "usuarios_google": { "type": "number" },
+        "usuarios_google_directo": { "type": "number" },
+        "usuarios_convertidos_google": { "type": "number" }
       },
-      "required": ["centros_creados", "institutos", "universidades", "colegios", "usuarios_anonimos", "usuarios_google"]
+      "required": ["centros_creados", "institutos", "universidades", "colegios", "usuarios_anonimos", "usuarios_google", "usuarios_google_directo", "usuarios_convertidos_google"]
     },
     "Profesor": {
       "title": "Profesor",

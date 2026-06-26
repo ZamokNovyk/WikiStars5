@@ -147,6 +147,8 @@ export default function App() {
     colegios: number;
     usuarios_anonimos: number;
     usuarios_google: number;
+    usuarios_google_directo: number;
+    usuarios_convertidos_google: number;
   } | null>(null);
 
   // Navigation and filters
@@ -173,6 +175,9 @@ export default function App() {
   const [isVotingProf, setIsVotingProf] = useState(false);
   const [globalSearch, setGlobalSearch] = useState<string>('');
   const [studentSearch, setStudentSearch] = useState<string>('');
+
+  // Keep track of the previous Firebase Auth user for statistics transitioning
+  const prevUserRef = React.useRef<any>(null);
 
   // Create Institute Modal State
   const [isCreateInstituteModalOpen, setIsCreateInstituteModalOpen] = useState(false);
@@ -641,6 +646,8 @@ export default function App() {
           colegios: data.colegios || 0,
           usuarios_anonimos: data.usuarios_anonimos || 0,
           usuarios_google: data.usuarios_google || 0,
+          usuarios_google_directo: data.usuarios_google_directo || 0,
+          usuarios_convertidos_google: data.usuarios_convertidos_google || 0,
         });
       } else {
         setDbStats({
@@ -650,6 +657,8 @@ export default function App() {
           colegios: 0,
           usuarios_anonimos: 0,
           usuarios_google: 0,
+          usuarios_google_directo: 0,
+          usuarios_convertidos_google: 0,
         });
       }
     }, (error) => {
@@ -1521,6 +1530,8 @@ export default function App() {
           const userDocRef = doc(db, 'users', firebaseUser.uid);
           const userDocSnap = await getDoc(userDocRef);
           
+          const isTransition = prevUserRef.current && prevUserRef.current.isAnonymous && !firebaseUser.isAnonymous;
+          
           let profileData;
           if (userDocSnap.exists()) {
             const data = userDocSnap.data();
@@ -1533,6 +1544,21 @@ export default function App() {
               instituteId: data.instituteId || '1',
               category: data.category || 'Influencer'
             };
+
+            // If we transitioned from anonymous to an existing Google user, decrement anonymous count
+            if (isTransition) {
+              const statsDocRef = doc(db, 'estadisticas', 'general');
+              await setDoc(statsDocRef, {
+                usuarios_anonimos: increment(-1)
+              }, { merge: true });
+
+              // Clean up the obsolete anonymous user document in Firestore to prevent database bloat
+              try {
+                await deleteDoc(doc(db, 'users', prevUserRef.current.uid));
+              } catch (delErr) {
+                console.warn("Could not delete legacy anonymous user doc:", delErr);
+              }
+            }
           } else {
             // Seeding/registering user in Firestore if not present
             const now = new Date();
@@ -1553,15 +1579,33 @@ export default function App() {
                 usuarios_anonimos: increment(1)
               }, { merge: true });
             } else {
-              await setDoc(statsDocRef, {
-                usuarios_google: increment(1)
-              }, { merge: true });
+              if (isTransition) {
+                // Deduct anonymous user count, and add registered Google user count (classified as converted)
+                await setDoc(statsDocRef, {
+                  usuarios_anonimos: increment(-1),
+                  usuarios_google: increment(1),
+                  usuarios_convertidos_google: increment(1)
+                }, { merge: true });
+
+                // Clean up the obsolete anonymous user document in Firestore to prevent database bloat
+                try {
+                  await deleteDoc(doc(db, 'users', prevUserRef.current.uid));
+                } catch (delErr) {
+                  console.warn("Could not delete legacy anonymous user doc:", delErr);
+                }
+              } else {
+                // Brand new direct Google registration
+                await setDoc(statsDocRef, {
+                  usuarios_google: increment(1),
+                  usuarios_google_directo: increment(1)
+                }, { merge: true });
+              }
             }
             
             profileData = {
               userId: firebaseUser.uid,
               name: newUserDoc.displayName,
-              nickname: newUserDoc.email ? newUserDoc.email.split('@')[0] : 'wikistar',
+              nickname: newUserDoc.email ? newUserDoc.email.split('@')[0] : 'starryz',
               email: newUserDoc.email,
               photoURL: newUserDoc.photoURL,
               instituteId: '1',
@@ -1574,7 +1618,7 @@ export default function App() {
           setCurrentUser({
             userId: firebaseUser.uid,
             name: firebaseUser.displayName || 'Estudiante',
-            nickname: firebaseUser.email ? firebaseUser.email.split('@')[0] : 'wikistar',
+            nickname: firebaseUser.email ? firebaseUser.email.split('@')[0] : 'starryz',
             email: firebaseUser.email || '',
             photoURL: firebaseUser.photoURL || '',
             instituteId: '1',
@@ -1582,6 +1626,9 @@ export default function App() {
           });
         }
       }
+      
+      // Save current user info for next auth state change transition checks
+      prevUserRef.current = firebaseUser;
     });
 
     return () => unsubscribeAuth();
@@ -5159,17 +5206,29 @@ export default function App() {
                         <span className="text-xs text-zinc-500 font-mono">cuentas en total</span>
                       </div>
 
-                      <div className="space-y-4 pt-2">
-                        {/* Google Auth user count */}
+                      <div className="space-y-3 pt-2">
+                        {/* Google Direct Auth user count */}
                         <div className="flex items-center justify-between p-3 bg-[#0d0d0f] border border-zinc-900 rounded-xl">
                           <div className="flex items-center gap-2">
-                            <div className="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse" />
+                            <div className="w-2.5 h-2.5 rounded-full bg-green-500" />
                             <div className="text-xs font-mono">
-                              <div className="text-white font-bold">Iniciados con Google</div>
-                              <div className="text-[10px] text-zinc-500">Cuentas sociales verificadas</div>
+                              <div className="text-white font-bold">Google (Registro Directo)</div>
+                              <div className="text-[10px] text-zinc-500">Ingresos directos con Google</div>
                             </div>
                           </div>
-                          <span className="text-lg font-mono font-bold text-white">{dbStats?.usuarios_google || 0}</span>
+                          <span className="text-lg font-mono font-bold text-white">{dbStats?.usuarios_google_directo || 0}</span>
+                        </div>
+
+                        {/* Google Converted Auth user count */}
+                        <div className="flex items-center justify-between p-3 bg-[#0d0d0f] border border-zinc-900 rounded-xl">
+                          <div className="flex items-center gap-2">
+                            <div className="w-2.5 h-2.5 rounded-full bg-yellow-400" />
+                            <div className="text-xs font-mono">
+                              <div className="text-white font-bold">Google (Convertidos)</div>
+                              <div className="text-[10px] text-zinc-500">Anónimos que se registraron</div>
+                            </div>
+                          </div>
+                          <span className="text-lg font-mono font-bold text-white">{dbStats?.usuarios_convertidos_google || 0}</span>
                         </div>
 
                         {/* Anonymous user count */}
