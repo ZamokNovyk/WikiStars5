@@ -178,6 +178,29 @@ export default function App() {
   const [activeBottomTab, setActiveBottomTab] = useState<'feed' | 'profile'>('feed');
   const [userProfile, setUserProfile] = useState<any>(null);
 
+  // Sync state with URL
+  useEffect(() => {
+    if (selectedAlumnoId) {
+      window.history.pushState(null, '', `/profile/${selectedAlumnoId}`);
+    } else if (selectedInstituteId) {
+      window.history.pushState(null, '', `/campus/${selectedInstituteId}`);
+    } else {
+      window.history.pushState(null, '', '/');
+    }
+  }, [selectedAlumnoId, selectedInstituteId]);
+
+  // Restore state from URL on load
+  useEffect(() => {
+    const path = window.location.pathname;
+    if (path.startsWith('/profile/')) {
+      const id = path.split('/')[2];
+      setSelectedAlumnoId(id);
+    } else if (path.startsWith('/campus/')) {
+      const id = path.split('/')[2];
+      setSelectedInstituteId(id);
+    }
+  }, []);
+
   // Edit Profile form states
   const [editProfileName, setEditProfileName] = useState('');
   const [editProfileNickname, setEditProfileNickname] = useState('');
