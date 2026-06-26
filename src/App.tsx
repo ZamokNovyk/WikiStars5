@@ -178,28 +178,88 @@ export default function App() {
   const [activeBottomTab, setActiveBottomTab] = useState<'feed' | 'profile'>('feed');
   const [userProfile, setUserProfile] = useState<any>(null);
 
-  // Sync state with URL
-  useEffect(() => {
-    if (selectedAlumnoId) {
-      window.history.pushState(null, '', `/profile/${selectedAlumnoId}`);
-    } else if (selectedInstituteId) {
-      window.history.pushState(null, '', `/campus/${selectedInstituteId}`);
-    } else {
-      window.history.pushState(null, '', '/');
-    }
-  }, [selectedAlumnoId, selectedInstituteId]);
+  // Sync state with URL and restore state on load with popstate support
+  const [isUrlRestored, setIsUrlRestored] = useState(false);
 
-  // Restore state from URL on load
-  useEffect(() => {
-    const path = window.location.pathname;
-    if (path.startsWith('/profile/')) {
+  // Helper to sync app state based on any given path
+  const syncStateFromPath = (path: string) => {
+    if (path.startsWith('/perfiles/')) {
+      const id = path.split('/')[2];
+      setSelectedProfessorId(id);
+      setSelectedAlumnoId(null);
+    } else if (path.startsWith('/profile/')) {
       const id = path.split('/')[2];
       setSelectedAlumnoId(id);
+      setSelectedProfessorId(null);
     } else if (path.startsWith('/campus/')) {
       const id = path.split('/')[2];
       setSelectedInstituteId(id);
+      setSelectedAlumnoId(null);
+      setSelectedProfessorId(null);
+    } else {
+      setSelectedAlumnoId(null);
+      setSelectedProfessorId(null);
+      setSelectedInstituteId(null);
     }
+  };
+
+  // 1. Initial restore & Popstate listener (for browser Back/Forward navigation)
+  useEffect(() => {
+    // Restore on load
+    syncStateFromPath(window.location.pathname);
+    setIsUrlRestored(true);
+
+    // Handle Back/Forward buttons
+    const handlePopState = () => {
+      syncStateFromPath(window.location.pathname);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
   }, []);
+
+  // 2. Sync state back to URL when selections change
+  useEffect(() => {
+    if (!isUrlRestored) return;
+
+    const currentPath = window.location.pathname;
+    let targetPath = '/';
+
+    if (selectedProfessorId) {
+      targetPath = `/perfiles/${selectedProfessorId}`;
+    } else if (selectedAlumnoId) {
+      targetPath = `/profile/${selectedAlumnoId}`;
+    } else if (selectedInstituteId) {
+      targetPath = `/campus/${selectedInstituteId}`;
+    }
+
+    // Only push if the path actually changed to avoid duplicate history states
+    if (currentPath !== targetPath) {
+      window.history.pushState(null, '', targetPath);
+    }
+  }, [selectedProfessorId, selectedAlumnoId, selectedInstituteId, isUrlRestored]);
+
+  // If we loaded a professor profile via URL, resolve its institute ID from the global perfiles collection
+  useEffect(() => {
+    if (selectedProfessorId && !selectedInstituteId && perfiles && perfiles.length > 0) {
+      const matchedProfile = perfiles.find(p => p.id === selectedProfessorId);
+      if (matchedProfile && matchedProfile.instituteId) {
+        setSelectedInstituteId(matchedProfile.instituteId);
+      }
+    }
+  }, [selectedProfessorId, selectedInstituteId, perfiles]);
+
+  // If we loaded a student profile via URL, resolve its institute ID from the global alumnos collection
+  useEffect(() => {
+    if (selectedAlumnoId && !selectedInstituteId && alumnos && alumnos.length > 0) {
+      const matchedAlumno = alumnos.find(a => a.id === selectedAlumnoId);
+      if (matchedAlumno && matchedAlumno.instituteId) {
+        setSelectedInstituteId(matchedAlumno.instituteId);
+      }
+    }
+  }, [selectedAlumnoId, selectedInstituteId, alumnos]);
 
   // Edit Profile form states
   const [editProfileName, setEditProfileName] = useState('');
