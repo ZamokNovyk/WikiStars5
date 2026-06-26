@@ -18,13 +18,18 @@ const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 export const auth = getAuth(app);
 
-// Sign in anonymously for simple demo connectivity, ignoring error if analytics fails
-try {
-  signInAnonymously(auth).catch((err) => {
-    console.warn("Auth anonymous sign in failed:", err);
-  });
-} catch (e) {
-  console.warn("Auth initialization error ignored:", e);
+// Helper function to lazily ensure the user is authenticated (anonymously) on user action
+export async function ensureAnonymousSignIn() {
+  if (auth.currentUser) {
+    return auth.currentUser;
+  }
+  try {
+    const result = await signInAnonymously(auth);
+    return result.user;
+  } catch (err) {
+    console.error("Auth anonymous sign in failed:", err);
+    throw err;
+  }
 }
 
 export enum OperationType {

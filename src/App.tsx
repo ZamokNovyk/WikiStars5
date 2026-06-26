@@ -55,7 +55,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { Institute, Alumno, AlumnoComment } from './types';
 import { INITIAL_INSTITUTES, INITIAL_ALUMNOS, INITIAL_COMMENTS } from './data';
-import { db, auth, handleFirestoreError, OperationType } from './firebase';
+import { db, auth, handleFirestoreError, OperationType, ensureAnonymousSignIn } from './firebase';
 import { collection, doc, setDoc, getDoc, getDocs, deleteDoc, onSnapshot, serverTimestamp, increment, runTransaction, deleteField } from 'firebase/firestore';
 import { GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 
@@ -753,6 +753,7 @@ export default function App() {
 
     setIsSubmittingProf(true);
     try {
+      await ensureAnonymousSignIn();
       const nombreCompleto = `${newProfNombre.trim()} ${newProfApellidos.trim()}`;
       const profId = nombreCompleto
         .toLowerCase()
@@ -804,15 +805,17 @@ export default function App() {
 
   const handleVoteProfessorType = async (profId: string, type: 'yoTeConozco' | 'fan') => {
     if (isVotingProf) return;
-    const userId = auth.currentUser?.uid || getGuestId();
-    const otherType = type === 'yoTeConozco' ? 'fan' : 'yoTeConozco';
-    
-    const currentVotes = userVotes[profId] || { yoTeConozco: false, fan: false, crush: false };
-    const isCurrentlyVoted = currentVotes[type];
-    const isOtherVoted = currentVotes[otherType];
     
     setIsVotingProf(true);
     try {
+      const user = await ensureAnonymousSignIn();
+      const userId = auth.currentUser?.uid || user.uid;
+      const otherType = type === 'yoTeConozco' ? 'fan' : 'yoTeConozco';
+      
+      const currentVotes = userVotes[profId] || { yoTeConozco: false, fan: false, crush: false };
+      const isCurrentlyVoted = currentVotes[type];
+      const isOtherVoted = currentVotes[otherType];
+      
       await runTransaction(db, async (transaction) => {
         const timestamp = new Date().toISOString();
         const instDocRef = selectedInstituteId ? doc(db, `centros.educativos/${selectedInstituteId}/profesores`, profId) : null;
@@ -859,12 +862,14 @@ export default function App() {
 
   const handleToggleCrush = async (profId: string) => {
     if (isVotingProf) return;
-    const userId = auth.currentUser?.uid || getGuestId();
-    
-    const hasCrush = (userVotes[profId] || { crush: false }).crush;
     
     setIsVotingProf(true);
     try {
+      const user = await ensureAnonymousSignIn();
+      const userId = auth.currentUser?.uid || user.uid;
+      
+      const hasCrush = (userVotes[profId] || { crush: false }).crush;
+      
       await runTransaction(db, async (transaction) => {
         const timestamp = new Date().toISOString();
         const instDocRef = selectedInstituteId ? doc(db, `centros.educativos/${selectedInstituteId}/profesores`, profId) : null;
@@ -911,16 +916,19 @@ export default function App() {
   const handleSubmitCrush = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedProfessorId || !selectedInstituteId || !newCrushText.trim() || isSubmittingCrush) return;
-    const authorId = auth.currentUser?.uid || getGuestId();
     
-    const alreadyHasCrush = profCrushes.some(c => c.authorId === authorId);
-    if (alreadyHasCrush) {
-      triggerNotice('Ya tienes un mensaje de amor publicado. Elimínalo para poder enviar uno nuevo.');
-      return;
-    }
-
     setIsSubmittingCrush(true);
     try {
+      const user = await ensureAnonymousSignIn();
+      const authorId = auth.currentUser?.uid || user.uid;
+      
+      const alreadyHasCrush = profCrushes.some(c => c.authorId === authorId);
+      if (alreadyHasCrush) {
+        triggerNotice('Ya tienes un mensaje de amor publicado. Elimínalo para poder enviar uno nuevo.');
+        setIsSubmittingCrush(false);
+        return;
+      }
+
       const crushId = authorId;
       const text = newCrushText.trim();
       const timestamp = new Date().toISOString();
@@ -954,16 +962,18 @@ export default function App() {
 
   const handleDeleteCrush = async (crushAuthorId?: string) => {
     if (!selectedProfessorId || !selectedInstituteId || isSubmittingCrush) return;
-    const userId = auth.currentUser?.uid || getGuestId();
-    const targetId = crushAuthorId || userId;
     
-    if (targetId !== userId) {
-      triggerNotice('Solo puedes eliminar tu propio mensaje de amor.');
-      return;
-    }
-
     setIsSubmittingCrush(true);
     try {
+      const user = await ensureAnonymousSignIn();
+      const userId = auth.currentUser?.uid || user.uid;
+      const targetId = crushAuthorId || userId;
+      
+      if (targetId !== userId) {
+        triggerNotice('Solo puedes eliminar tu propio mensaje de amor.');
+        setIsSubmittingCrush(false);
+        return;
+      }
       await runTransaction(db, async (transaction) => {
         const instCrushRef = doc(db, `centros.educativos/${selectedInstituteId}/profesores/${selectedProfessorId}/crushes`, targetId);
         const perfCrushRef = doc(db, `perfiles/${selectedProfessorId}/crushes`, targetId);
@@ -1144,6 +1154,7 @@ export default function App() {
     setWikiErrors({});
     setIsSubmittingWikiEdit(true);
     try {
+      await ensureAnonymousSignIn();
       const yearNum = wikiAnoFundacion && wikiAnoFundacion.trim() ? parseInt(wikiAnoFundacion, 10) : null;
       
       const updateData = {
@@ -1172,6 +1183,7 @@ export default function App() {
     if (!selectedProfessorId || !selectedInstituteId || isSubmittingWiki) return;
     setIsSubmittingWiki(true);
     try {
+      await ensureAnonymousSignIn();
       const profDocRef = doc(db, 'centros.educativos', selectedInstituteId, 'profesores', selectedProfessorId);
       const perfDocRef = doc(db, 'perfiles', selectedProfessorId);
       
@@ -1206,7 +1218,8 @@ export default function App() {
     if (!selectedProfessorId || !selectedInstituteId || isSubmittingReview) return;
     setIsSubmittingReview(true);
     try {
-      const authorId = auth.currentUser?.uid || getGuestId();
+      const user = await ensureAnonymousSignIn();
+      const authorId = auth.currentUser?.uid || user.uid;
       const text = `Calificó con ★ ${rating}`;
       const timestamp = new Date().toISOString();
       const authorName = currentUser ? currentUser.name : 'Estudiante Anónimo';
@@ -1333,7 +1346,6 @@ export default function App() {
 
   const handleVoteShip = async (shipId: string) => {
     if (!selectedProfessorId) return;
-    const userId = auth.currentUser?.uid || getGuestId();
 
     if (userVotedShipId) {
       triggerNotice('¡Ya votaste por tu ship favorito para este docente!');
@@ -1341,6 +1353,9 @@ export default function App() {
     }
 
     try {
+      const user = await ensureAnonymousSignIn();
+      const userId = auth.currentUser?.uid || user.uid;
+
       await setDoc(doc(db, `perfiles/${selectedProfessorId}/shipsVotedBy`, userId), {
         shipId,
         votedAt: new Date().toISOString()
@@ -1456,6 +1471,7 @@ export default function App() {
     }
 
     try {
+      await ensureAnonymousSignIn();
       const updatedAlumno: Alumno = {
         ...al,
         ...updatedFields,
@@ -1481,6 +1497,7 @@ export default function App() {
     if (!al) return;
 
     try {
+      await ensureAnonymousSignIn();
       const updatedAlumno: Alumno = {
         ...al,
         points: al.points + 1,
@@ -1503,6 +1520,13 @@ export default function App() {
   const handleAddComment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCommentText.trim() || !selectedAlumnoId) return;
+
+    try {
+      await ensureAnonymousSignIn();
+    } catch (err) {
+      triggerNotice('Error de autenticación.');
+      return;
+    }
 
     const authorName = postAsAnonymous || !currentUser ? 'Anónimo' : currentUser.name;
     const authorNickname = postAsAnonymous || !currentUser ? '@anon' : `@${currentUser.nickname}`;
@@ -1554,6 +1578,7 @@ export default function App() {
     if (!c) return;
 
     try {
+      await ensureAnonymousSignIn();
       await setDoc(doc(db, 'comments', commentId), {
         ...c,
         likes: c.likes + 1
@@ -1596,6 +1621,7 @@ export default function App() {
     };
 
     try {
+      await ensureAnonymousSignIn();
       await setDoc(doc(db, 'alumnos', newId), newAlumno);
       setIsNominateModalOpen(false);
 
@@ -1624,28 +1650,29 @@ export default function App() {
 
     setIsSubmittingInstitute(true);
     const docId = generateDocId(newInstituteName);
-    const { searchTokens, searchKeywords } = generateSearchArrays(newInstituteName);
-
-    // Default professional high-quality campus graphics
-    const perfilPhotoUrl = "https://images.unsplash.com/photo-1541339907198-e08756dedf3f?auto=format&fit=crop&q=80&w=300";
-    const portadaPhotoUrl = "https://images.unsplash.com/photo-1523050854058-8df90110c9f1?auto=format&fit=crop&q=80&w=1200";
-
-    const newCentro = {
-      anoDeFundacion: null,
-      creadoEn: serverTimestamp(),
-      creadoPor: auth.currentUser?.uid || "G9m5dcwEdAhc7L3rJeBgpFv4nh73",
-      nombre: newInstituteName.trim(),
-      perfilPhotoUrl,
-      portadaPhotoUrl,
-      redesSociales: {
-        facebook: `https://web.facebook.com/${generateDocId(newInstituteName)}`
-      },
-      searchKeywords,
-      searchTokens,
-      tipo: newInstituteTipo
-    };
-
     try {
+      await ensureAnonymousSignIn();
+      const { searchTokens, searchKeywords } = generateSearchArrays(newInstituteName);
+
+      // Default professional high-quality campus graphics
+      const perfilPhotoUrl = "https://images.unsplash.com/photo-1541339907198-e08756dedf3f?auto=format&fit=crop&q=80&w=300";
+      const portadaPhotoUrl = "https://images.unsplash.com/photo-1523050854058-8df90110c9f1?auto=format&fit=crop&q=80&w=1200";
+
+      const newCentro = {
+        anoDeFundacion: null,
+        creadoEn: serverTimestamp(),
+        creadoPor: auth.currentUser?.uid || "G9m5dcwEdAhc7L3rJeBgpFv4nh73",
+        nombre: newInstituteName.trim(),
+        perfilPhotoUrl,
+        portadaPhotoUrl,
+        redesSociales: {
+          facebook: `https://web.facebook.com/${generateDocId(newInstituteName)}`
+        },
+        searchKeywords,
+        searchTokens,
+        tipo: newInstituteTipo
+      };
+
       await setDoc(doc(db, 'centros.educativos', docId), newCentro);
       setIsCreateInstituteModalOpen(false);
       setNewInstituteName('');
