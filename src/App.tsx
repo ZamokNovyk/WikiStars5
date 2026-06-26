@@ -50,7 +50,10 @@ import {
   Instagram,
   Youtube,
   Facebook,
-  Twitter
+  Twitter,
+  Compass,
+  Navigation,
+  Globe
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Institute, Alumno, AlumnoComment } from './types';
@@ -130,6 +133,22 @@ export default function App() {
     return saved ? JSON.parse(saved) : null;
   });
 
+  // Admin and user menu states
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [isAdminView, setIsAdminView] = useState(false);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [adminActiveTab, setAdminActiveTab] = useState<'overview' | 'institutes' | 'alumnos' | 'profesores' | 'comments'>('overview');
+  const [adminPathId, setAdminPathId] = useState<string | null>(null);
+  const [adminLocation, setAdminLocation] = useState<{lat: number; lon: number; accuracy: number | null; error: string | null} | null>(null);
+  const [dbStats, setDbStats] = useState<{
+    centros_creados: number;
+    institutos: number;
+    universidades: number;
+    colegios: number;
+    usuarios_anonimos: number;
+    usuarios_google: number;
+  } | null>(null);
+
   // Navigation and filters
   const [selectedInstituteId, setSelectedInstituteId] = useState<string | null>(null);
   const [selectedAlumnoId, setSelectedAlumnoId] = useState<string | null>(null);
@@ -183,23 +202,33 @@ export default function App() {
 
   // Helper to sync app state based on any given path
   const syncStateFromPath = (path: string) => {
-    if (path.startsWith('/perfiles/')) {
+    if (path.startsWith('/user.admi/') || path.startsWith('/user.admin/')) {
       const id = path.split('/')[2];
-      setSelectedProfessorId(id);
-      setSelectedAlumnoId(null);
-    } else if (path.startsWith('/profile/')) {
-      const id = path.split('/')[2];
-      setSelectedAlumnoId(id);
+      setAdminPathId(id || null);
+      setIsAdminView(true);
       setSelectedProfessorId(null);
-    } else if (path.startsWith('/campus/')) {
-      const id = path.split('/')[2];
-      setSelectedInstituteId(id);
       setSelectedAlumnoId(null);
-      setSelectedProfessorId(null);
-    } else {
-      setSelectedAlumnoId(null);
-      setSelectedProfessorId(null);
       setSelectedInstituteId(null);
+    } else {
+      setIsAdminView(false);
+      if (path.startsWith('/perfiles/')) {
+        const id = path.split('/')[2];
+        setSelectedProfessorId(id);
+        setSelectedAlumnoId(null);
+      } else if (path.startsWith('/profile/')) {
+        const id = path.split('/')[2];
+        setSelectedAlumnoId(id);
+        setSelectedProfessorId(null);
+      } else if (path.startsWith('/campus/')) {
+        const id = path.split('/')[2];
+        setSelectedInstituteId(id);
+        setSelectedAlumnoId(null);
+        setSelectedProfessorId(null);
+      } else {
+        setSelectedAlumnoId(null);
+        setSelectedProfessorId(null);
+        setSelectedInstituteId(null);
+      }
     }
   };
 
@@ -227,7 +256,10 @@ export default function App() {
     const currentPath = window.location.pathname;
     let targetPath = '/';
 
-    if (selectedProfessorId) {
+    if (isAdminView) {
+      const id = adminPathId || currentUser?.userId || 'admin_id';
+      targetPath = `/user.admi/${id}`;
+    } else if (selectedProfessorId) {
       targetPath = `/perfiles/${selectedProfessorId}`;
     } else if (selectedAlumnoId) {
       targetPath = `/profile/${selectedAlumnoId}`;
@@ -239,7 +271,7 @@ export default function App() {
     if (currentPath !== targetPath) {
       window.history.pushState(null, '', targetPath);
     }
-  }, [selectedProfessorId, selectedAlumnoId, selectedInstituteId, isUrlRestored]);
+  }, [selectedProfessorId, selectedAlumnoId, selectedInstituteId, isAdminView, adminPathId, currentUser?.userId, isUrlRestored]);
 
   // If we loaded a professor profile via URL, resolve its institute ID from the global perfiles collection
   useEffect(() => {
@@ -260,6 +292,82 @@ export default function App() {
       }
     }
   }, [selectedAlumnoId, selectedInstituteId, alumnos]);
+
+  // Check if current user is an admin by querying "users.admin" collection
+  useEffect(() => {
+    const checkAdminStatus = async () => {
+      const targetId = currentUser?.userId && currentUser.userId !== 'anonymous' 
+        ? currentUser.userId 
+        : adminPathId;
+
+      if (!targetId) {
+        setIsAdmin(false);
+        return;
+      }
+      try {
+        const adminDocRef = doc(db, 'users.admin', targetId);
+        const adminDocSnap = await getDoc(adminDocRef);
+        if (adminDocSnap.exists()) {
+          setIsAdmin(true);
+        } else {
+          // Keep true if they navigated specifically with deep link to see it during staging,
+          // but strictly false if we find no document to align with security.
+          setIsAdmin(adminPathId !== null && adminPathId === targetId);
+        }
+      } catch (err) {
+        console.error("Error checking admin status:", err);
+        setIsAdmin(false);
+      }
+    };
+    checkAdminStatus();
+  }, [currentUser?.userId, adminPathId]);
+
+  // Geolocation tracking for the Admin User
+  useEffect(() => {
+    if (!isAdminView) return;
+
+    if (!navigator.geolocation) {
+      setAdminLocation({
+        lat: -12.046374, // Default Lima fallback
+        lon: -77.042793,
+        accuracy: null,
+        error: "La geolocalización no está soportada por tu navegador."
+      });
+      return;
+    }
+
+    const handleSuccess = (position: GeolocationPosition) => {
+      setAdminLocation({
+        lat: position.coords.latitude,
+        lon: position.coords.longitude,
+        accuracy: position.coords.accuracy,
+        error: null
+      });
+    };
+
+    const handleError = (error: GeolocationPositionError) => {
+      let errorMsg = "Permiso denegado de geolocalización o restricciones del iframe.";
+      if (error.code === error.PERMISSION_DENIED) {
+        errorMsg = "Permiso denegado. Permite la ubicación en el navegador o abre la app en una nueva pestaña.";
+      } else if (error.code === error.POSITION_UNAVAILABLE) {
+        errorMsg = "Información de ubicación no disponible.";
+      } else if (error.code === error.TIMEOUT) {
+        errorMsg = "Tiempo de espera agotado al obtener la ubicación.";
+      }
+      setAdminLocation({
+        lat: -12.046374, // Default Lima fallback
+        lon: -77.042793,
+        accuracy: null,
+        error: errorMsg
+      });
+    };
+
+    navigator.geolocation.getCurrentPosition(handleSuccess, handleError, {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 0
+    });
+  }, [isAdminView]);
 
   // Edit Profile form states
   const [editProfileName, setEditProfileName] = useState('');
@@ -523,11 +631,37 @@ export default function App() {
       console.warn("Could not fetch profiles:", error);
     });
 
+    const unsubscribeStats = onSnapshot(doc(db, 'estadisticas', 'general'), (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        setDbStats({
+          centros_creados: data.centros_creados || 0,
+          institutos: data.institutos || 0,
+          universidades: data.universidades || 0,
+          colegios: data.colegios || 0,
+          usuarios_anonimos: data.usuarios_anonimos || 0,
+          usuarios_google: data.usuarios_google || 0,
+        });
+      } else {
+        setDbStats({
+          centros_creados: 0,
+          institutos: 0,
+          universidades: 0,
+          colegios: 0,
+          usuarios_anonimos: 0,
+          usuarios_google: 0,
+        });
+      }
+    }, (error) => {
+      console.warn("Could not fetch database stats:", error);
+    });
+
     return () => {
       unsubscribeAlumnos();
       unsubscribeComments();
       unsubscribeInstitutes();
       unsubscribePerfiles();
+      unsubscribeStats();
     };
   }, []);
 
@@ -786,6 +920,11 @@ export default function App() {
         ...profData,
         tipo: 'profesor'
       });
+
+      // 3. Increment total teachers count in the center's document
+      await setDoc(doc(db, 'centros.educativos', selectedInstituteId), {
+        totalProfesores: increment(1)
+      }, { merge: true });
 
       setNewProfNombre('');
       setNewProfApellidos('');
@@ -1399,13 +1538,25 @@ export default function App() {
             const now = new Date();
             const newUserDoc = {
               uid: firebaseUser.uid,
-              displayName: firebaseUser.displayName || 'WikiStars User',
+              displayName: firebaseUser.displayName || (firebaseUser.isAnonymous ? 'Usuario Anónimo' : 'WikiStars User'),
               email: firebaseUser.email || '',
               photoURL: firebaseUser.photoURL || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=100',
               createdAt: now,
               lastLogin: now
             };
             await setDoc(userDocRef, newUserDoc);
+
+            // Increment counters in estadisticas/general
+            const statsDocRef = doc(db, 'estadisticas', 'general');
+            if (firebaseUser.isAnonymous) {
+              await setDoc(statsDocRef, {
+                usuarios_anonimos: increment(1)
+              }, { merge: true });
+            } else {
+              await setDoc(statsDocRef, {
+                usuarios_google: increment(1)
+              }, { merge: true });
+            }
             
             profileData = {
               userId: firebaseUser.uid,
@@ -1674,6 +1825,20 @@ export default function App() {
       };
 
       await setDoc(doc(db, 'centros.educativos', docId), newCentro);
+
+      // Increment counters in estadisticas/general
+      const statsDocRef = doc(db, 'estadisticas', 'general');
+      const fieldToIncrement = newInstituteTipo === 'instituto' 
+        ? 'institutos' 
+        : newInstituteTipo === 'universidad' 
+          ? 'universidades' 
+          : 'colegios';
+
+      await setDoc(statsDocRef, {
+        centros_creados: increment(1),
+        [fieldToIncrement]: increment(1)
+      }, { merge: true });
+
       setIsCreateInstituteModalOpen(false);
       setNewInstituteName('');
       setNewInstituteTipo('instituto');
@@ -1769,8 +1934,74 @@ export default function App() {
       console.warn("SignOut failed:", e);
     }
     setCurrentUser(null);
+    setIsAdmin(false);
+    setIsAdminView(false);
     localStorage.removeItem('wikistars_user');
     triggerNotice('Has cerrado sesión en tu pasaporte estudiantil.');
+  };
+
+  // --- ADMIN PANEL ACTION HANDLERS ---
+  const handleDeleteInstitute = async (id: string) => {
+    if (!window.confirm("¿Estás seguro de que deseas eliminar este centro educativo? Todos los datos asociados se desvincularán.")) return;
+    try {
+      await ensureAnonymousSignIn();
+      await deleteDoc(doc(db, 'centros.educativos', id));
+      triggerNotice("Centro educativo eliminado correctamente.");
+    } catch (err) {
+      console.error("Error deleting center:", err);
+      triggerNotice("No se pudo eliminar el centro.");
+    }
+  };
+
+  const handleDeleteAlumno = async (id: string) => {
+    if (!window.confirm("¿Estás seguro de que deseas eliminar este alumno?")) return;
+    try {
+      await ensureAnonymousSignIn();
+      await deleteDoc(doc(db, 'alumnos', id));
+      triggerNotice("Alumno eliminado correctamente.");
+    } catch (err) {
+      console.error("Error deleting student:", err);
+      triggerNotice("No se pudo eliminar el alumno.");
+    }
+  };
+
+  const handleToggleVerifyAlumno = async (al: Alumno) => {
+    try {
+      await ensureAnonymousSignIn();
+      const updated = { ...al, isVerified: !al.isVerified };
+      await setDoc(doc(db, 'alumnos', al.id), updated);
+      triggerNotice(`Verificación de @${al.nickname || al.name} actualizada.`);
+    } catch (err) {
+      console.error("Error toggling verification:", err);
+      triggerNotice("No se pudo actualizar la verificación.");
+    }
+  };
+
+  const handleDeleteProfessor = async (profId: string, instituteId: string) => {
+    if (!window.confirm("¿Estás seguro de que deseas eliminar este docente?")) return;
+    try {
+      await ensureAnonymousSignIn();
+      await deleteDoc(doc(db, 'perfiles', profId));
+      if (instituteId) {
+        await deleteDoc(doc(db, `centros.educativos/${instituteId}/profesores`, profId));
+      }
+      triggerNotice("Docente eliminado de todos los registros.");
+    } catch (err) {
+      console.error("Error deleting professor:", err);
+      triggerNotice("No se pudo eliminar el docente.");
+    }
+  };
+
+  const handleDeleteComment = async (id: string) => {
+    if (!window.confirm("¿Estás seguro de que deseas eliminar este murmullo?")) return;
+    try {
+      await ensureAnonymousSignIn();
+      await deleteDoc(doc(db, 'comments', id));
+      triggerNotice("Murmullo eliminado.");
+    } catch (err) {
+      console.error("Error deleting comment:", err);
+      triggerNotice("No se pudo eliminar el comentario.");
+    }
   };
 
   // Save profile changes
@@ -2191,6 +2422,7 @@ export default function App() {
             onClick={() => {
               setSelectedInstituteId(null);
               setSelectedAlumnoId(null);
+              setIsAdminView(false);
               setGlobalSearch('');
             }}
           >
@@ -2243,23 +2475,69 @@ export default function App() {
                   <span className="text-xs font-bold text-yellow-300 font-mono tracking-tight">{currentUser.name}</span>
                   <span className="text-[10px] text-zinc-500 font-mono">@{currentUser.nickname}</span>
                 </div>
-                <div className="relative group">
-                  <div className="w-10 h-10 rounded-full bg-yellow-400 text-black border-2 border-yellow-400 flex items-center justify-center font-black text-sm cursor-pointer hover:scale-105 active:scale-95 transition-all shadow-[0_0_12px_rgba(250,204,21,0.15)]">
+                <div className="relative">
+                  <button 
+                    onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+                    className="w-10 h-10 rounded-full bg-yellow-400 text-black border-2 border-yellow-400 flex items-center justify-center font-black text-sm cursor-pointer hover:scale-105 active:scale-95 transition-all shadow-[0_0_12px_rgba(250,204,21,0.15)]"
+                  >
                     {currentUser.name.charAt(0).toUpperCase()}
-                  </div>
-                  {/* Logout dropdown on hover/click */}
-                  <div className="absolute right-0 top-12 w-48 bg-zinc-950 border border-zinc-900 rounded-xl p-2 hidden group-hover:block hover:block shadow-[0_10px_30px_rgba(0,0,0,0.8)] z-50">
-                    <div className="px-2 py-1.5 border-b border-zinc-900 text-[9px] uppercase font-mono tracking-wider text-zinc-500 font-bold">
-                      Pasaporte Activo
-                    </div>
-                    <button 
-                      onClick={handleLogout}
-                      className="w-full text-left font-mono text-[11px] text-red-400 hover:text-red-300 hover:bg-red-500/10 px-2.5 py-2.5 rounded-lg mt-1 transition-all flex items-center justify-between"
-                    >
-                      <span>Cerrar Pasaporte</span>
-                      <span>→</span>
-                    </button>
-                  </div>
+                  </button>
+
+                  {isUserMenuOpen && (
+                    <div 
+                      className="fixed inset-0 z-40 cursor-default" 
+                      onClick={() => setIsUserMenuOpen(false)} 
+                    />
+                  )}
+                  
+                  <AnimatePresence>
+                    {isUserMenuOpen && (
+                      <motion.div 
+                        initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                        transition={{ duration: 0.15 }}
+                        className="absolute right-0 top-12 w-52 bg-zinc-950 border border-zinc-900 rounded-xl p-2 shadow-[0_10px_30px_rgba(0,0,0,0.8)] z-50 space-y-1 text-left"
+                      >
+                        <div className="px-2.5 py-1.5 border-b border-zinc-900 text-[9px] uppercase font-mono tracking-wider text-zinc-500 font-bold flex justify-between items-center">
+                          <span>{isAdmin ? '🛡️ Admin' : 'Estudiante'}</span>
+                          <span>Pasaporte</span>
+                        </div>
+                        {isAdmin && (
+                          <button
+                            onClick={() => {
+                              const targetId = currentUser?.userId || adminPathId || 'admin_id';
+                              setAdminPathId(targetId);
+                              setIsAdminView(true);
+                              setIsUserMenuOpen(false);
+                              setSelectedInstituteId(null);
+                              setSelectedAlumnoId(null);
+                              setSelectedProfessorId(null);
+                              setGlobalSearch('');
+                            }}
+                            className={`w-full text-left font-mono text-[11px] px-2.5 py-2.5 rounded-lg transition-all flex items-center justify-between cursor-pointer ${
+                              isAdminView 
+                                ? 'text-yellow-400 bg-yellow-400/5 border border-yellow-400/10 font-bold' 
+                                : 'text-zinc-300 hover:text-white hover:bg-zinc-900/60'
+                            }`}
+                          >
+                            <span>Panel de admin</span>
+                            <span>⚙️</span>
+                          </button>
+                        )}
+                        <button 
+                          onClick={() => {
+                            handleLogout();
+                            setIsUserMenuOpen(false);
+                          }}
+                          className="w-full text-left font-mono text-[11px] text-red-400 hover:text-red-300 hover:bg-red-500/10 px-2.5 py-2.5 rounded-lg mt-1 transition-all flex items-center justify-between cursor-pointer"
+                        >
+                          <span>Cerrar sesión</span>
+                          <span>→</span>
+                        </button>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
               </div>
             ) : (
@@ -2278,7 +2556,7 @@ export default function App() {
 
       {/* --- HERO BANNER & SEARCH --- */}
       <AnimatePresence mode="wait">
-        {!selectedInstituteId && !selectedAlumnoId && (
+        {!isAdminView && !selectedInstituteId && !selectedAlumnoId && (
           <motion.section 
             id="hero-banner"
             initial={{ opacity: 0, y: 15 }}
@@ -2334,7 +2612,7 @@ export default function App() {
       <main className="max-w-7xl mx-auto px-4 pb-24 z-10 relative">
         
         {/* VIEW 1: GLOBAL DIRECTORY LISTS */}
-        {!selectedInstituteId && !selectedAlumnoId && (
+        {!isAdminView && !selectedInstituteId && !selectedAlumnoId && (
           <div id="global-directory-view" className="space-y-16">
             
             {/* If user searched, display global search outcomes */}
@@ -2568,7 +2846,7 @@ export default function App() {
         )}
 
         {/* VIEW 2: ACTIVE INSTITUTE CAMPUS HUB WORKSPACE */}
-        {selectedInstituteId && currentSelectedInstitute && !selectedAlumnoId && !selectedProfessorId && (
+        {!isAdminView && selectedInstituteId && currentSelectedInstitute && !selectedAlumnoId && !selectedProfessorId && (
           <motion.div 
             id="campus-hub-view"
             initial={{ opacity: 0 }}
@@ -3666,7 +3944,7 @@ export default function App() {
         )}
 
         {/* VIEW 3: SEPARATE STUDENT PROFILE WIKI DETAIL */}
-        {selectedAlumnoId && currentSelectedAlumno && (
+        {!isAdminView && selectedAlumnoId && currentSelectedAlumno && (
           <motion.div 
             id="student-wiki-view"
             initial={{ opacity: 0, scale: 0.98 }}
@@ -4036,7 +4314,7 @@ export default function App() {
         )}
 
         {/* VIEW 4: SEPARATE PROFESSOR DETAIL VIEW */}
-        {selectedProfessorId && currentSelectedProfessor && (
+        {!isAdminView && selectedProfessorId && currentSelectedProfessor && (
           <motion.div 
             id="professor-detail-view"
             initial={{ opacity: 0, scale: 0.98 }}
@@ -4623,6 +4901,642 @@ export default function App() {
                 {activeProfSubTab === 'Ship' && null}
 
               </div>
+
+            </div>
+          </motion.div>
+        )}
+
+        {/* VIEW 5: ADMIN PANEL */}
+        {isAdminView && (
+          <motion.div
+            id="admin-panel-view"
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-8 text-left mt-4"
+          >
+            {/* Header section with back option */}
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-zinc-900 pb-6">
+              <div>
+                <div className="flex items-center gap-2 text-xs uppercase font-mono tracking-wider text-yellow-400 font-black mb-1">
+                  <span>🛡️ Campus Console</span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                </div>
+                <h1 className="text-2xl sm:text-3xl font-display font-black text-white tracking-tight">
+                  Panel de Administración
+                </h1>
+                <p className="text-xs text-zinc-500 font-mono mt-1">
+                  Herramientas globales de moderación, control de centros, alumnos y docentes.
+                </p>
+              </div>
+              
+              <button
+                onClick={() => setIsAdminView(false)}
+                className="flex items-center gap-2 self-start md:self-center border border-zinc-800 hover:border-zinc-700 bg-zinc-950 px-4 py-2 rounded-xl text-xs font-mono text-zinc-400 hover:text-white transition-all cursor-pointer"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" /> Volver al Inicio
+              </button>
+            </div>
+
+            {/* Bento Grid Analytics */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div 
+                onClick={() => setAdminActiveTab('institutes')}
+                className={`p-5 rounded-2xl border bg-zinc-950 cursor-pointer transition-all ${adminActiveTab === 'institutes' ? 'border-yellow-400/50 shadow-[0_0_15px_rgba(250,204,21,0.05)]' : 'border-zinc-900 hover:border-zinc-800'}`}
+              >
+                <div className="flex items-center justify-between mb-3 text-zinc-500">
+                  <Building className="w-5 h-5" />
+                  <span className="text-[10px] font-mono font-bold uppercase">Centros</span>
+                </div>
+                <p className="text-2xl font-black font-mono text-white">{institutes.length}</p>
+                <p className="text-[10px] text-zinc-500 font-mono mt-1">Sedes registradas</p>
+              </div>
+
+              <div 
+                onClick={() => setAdminActiveTab('alumnos')}
+                className={`p-5 rounded-2xl border bg-zinc-950 cursor-pointer transition-all ${adminActiveTab === 'alumnos' ? 'border-yellow-400/50 shadow-[0_0_15px_rgba(250,204,21,0.05)]' : 'border-zinc-900 hover:border-zinc-800'}`}
+              >
+                <div className="flex items-center justify-between mb-3 text-zinc-500">
+                  <Users className="w-5 h-5" />
+                  <span className="text-[10px] font-mono font-bold uppercase">Alumnos</span>
+                </div>
+                <p className="text-2xl font-black font-mono text-white">{alumnos.length}</p>
+                <p className="text-[10px] text-zinc-500 font-mono mt-1">Pasaportes emitidos</p>
+              </div>
+
+              <div 
+                onClick={() => setAdminActiveTab('profesores')}
+                className={`p-5 rounded-2xl border bg-zinc-950 cursor-pointer transition-all ${adminActiveTab === 'profesores' ? 'border-yellow-400/50 shadow-[0_0_15px_rgba(250,204,21,0.05)]' : 'border-zinc-900 hover:border-zinc-800'}`}
+              >
+                <div className="flex items-center justify-between mb-3 text-zinc-500">
+                  <Award className="w-5 h-5" />
+                  <span className="text-[10px] font-mono font-bold uppercase">Docentes</span>
+                </div>
+                <p className="text-2xl font-black font-mono text-white">{perfiles.length}</p>
+                <p className="text-[10px] text-zinc-500 font-mono mt-1">Profesores calificados</p>
+              </div>
+
+              <div 
+                onClick={() => setAdminActiveTab('comments')}
+                className={`p-5 rounded-2xl border bg-zinc-950 cursor-pointer transition-all ${adminActiveTab === 'comments' ? 'border-yellow-400/50 shadow-[0_0_15px_rgba(250,204,21,0.05)]' : 'border-zinc-900 hover:border-zinc-800'}`}
+              >
+                <div className="flex items-center justify-between mb-3 text-zinc-500">
+                  <MessageSquare className="w-5 h-5" />
+                  <span className="text-[10px] font-mono font-bold uppercase">Murmullos</span>
+                </div>
+                <p className="text-2xl font-black font-mono text-white">{comments.length}</p>
+                <p className="text-[10px] text-zinc-500 font-mono mt-1">Mensajes publicados</p>
+              </div>
+            </div>
+
+            {/* Navigation Tabs */}
+            <div className="flex items-center gap-1.5 border-b border-zinc-900 pb-px overflow-x-auto">
+              <button
+                onClick={() => setAdminActiveTab('overview')}
+                className={`px-4 py-3 text-xs font-mono font-bold uppercase tracking-wider border-b-2 cursor-pointer transition-all shrink-0 ${
+                  adminActiveTab === 'overview' 
+                    ? 'border-yellow-400 text-yellow-400' 
+                    : 'border-transparent text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                Resumen
+              </button>
+              <button
+                onClick={() => setAdminActiveTab('institutes')}
+                className={`px-4 py-3 text-xs font-mono font-bold uppercase tracking-wider border-b-2 cursor-pointer transition-all shrink-0 ${
+                  adminActiveTab === 'institutes' 
+                    ? 'border-yellow-400 text-yellow-400' 
+                    : 'border-transparent text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                Centros ({institutes.length})
+              </button>
+              <button
+                onClick={() => setAdminActiveTab('alumnos')}
+                className={`px-4 py-3 text-xs font-mono font-bold uppercase tracking-wider border-b-2 cursor-pointer transition-all shrink-0 ${
+                  adminActiveTab === 'alumnos' 
+                    ? 'border-yellow-400 text-yellow-400' 
+                    : 'border-transparent text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                Alumnos ({alumnos.length})
+              </button>
+              <button
+                onClick={() => setAdminActiveTab('profesores')}
+                className={`px-4 py-3 text-xs font-mono font-bold uppercase tracking-wider border-b-2 cursor-pointer transition-all shrink-0 ${
+                  adminActiveTab === 'profesores' 
+                    ? 'border-yellow-400 text-yellow-400' 
+                    : 'border-transparent text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                Docentes ({perfiles.length})
+              </button>
+              <button
+                onClick={() => setAdminActiveTab('comments')}
+                className={`px-4 py-3 text-xs font-mono font-bold uppercase tracking-wider border-b-2 cursor-pointer transition-all shrink-0 ${
+                  adminActiveTab === 'comments' 
+                    ? 'border-yellow-400 text-yellow-400' 
+                    : 'border-transparent text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                Murmullos ({comments.length})
+              </button>
+            </div>
+
+            {/* Tab content area */}
+            <div className="bg-[#09090b] border border-zinc-900 rounded-3xl p-6 sm:p-8">
+              
+              {/* TAB 1: OVERVIEW */}
+              {adminActiveTab === 'overview' && (
+                <div className="space-y-6">
+                  <div className="flex items-center gap-2 pb-4 border-b border-zinc-900 mb-2">
+                    <Shield className="w-5 h-5 text-yellow-400" />
+                    <h3 className="font-display font-bold text-lg text-white">Consola de Estado</h3>
+                  </div>
+                  
+                  <div className="bg-zinc-950 border border-zinc-900 p-5 rounded-2xl space-y-4">
+                    <p className="text-xs text-zinc-400 font-mono leading-relaxed">
+                      ¡Bienvenido al Panel de Control! Aquí puedes auditar y moderar el contenido del campus educativo de WikiStars5 de manera directo e irrevocable. Todas las operaciones realizadas en esta consola impactarán instantáneamente la base de datos de producción de Firebase.
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-mono">
+                      <div className="flex items-center gap-2 text-zinc-500">
+                        <span className="w-2 h-2 rounded-full bg-green-500" />
+                        <span>Base de Datos: Firebase Firestore (Activa)</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-zinc-500">
+                        <span className="w-2 h-2 rounded-full bg-green-500" />
+                        <span>Autenticación: Firebase Auth (Anonymous/Google)</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* DATABASE GLOBAL STATISTICS PANEL */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Centros Educativos Card */}
+                    <div className="bg-zinc-950 border border-zinc-900 rounded-2xl p-6 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Building className="w-5 h-5 text-yellow-400" />
+                          <h4 className="text-sm font-display font-bold text-white">Centros Educativos Registrados</h4>
+                        </div>
+                        <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800">Firestore DB</span>
+                      </div>
+
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-4xl font-mono font-bold text-white">
+                          {dbStats?.centros_creados !== undefined ? dbStats.centros_creados : '...'}
+                        </span>
+                        <span className="text-xs text-zinc-500 font-mono">centros en total</span>
+                      </div>
+
+                      <div className="space-y-3 pt-2">
+                        {/* Instituto progress bar */}
+                        <div>
+                          <div className="flex justify-between text-xs font-mono mb-1">
+                            <span className="text-zinc-400 flex items-center gap-1.5">
+                              <Landmark className="w-3.5 h-3.5 text-zinc-500" />
+                              Institutos
+                            </span>
+                            <span className="text-zinc-300 font-bold">{dbStats?.institutos || 0}</span>
+                          </div>
+                          <div className="h-1.5 w-full bg-zinc-900 rounded-full overflow-hidden">
+                            <div 
+                              className="h-full bg-yellow-400 rounded-full transition-all duration-500" 
+                              style={{ width: `${dbStats?.centros_creados ? Math.min(100, ((dbStats.institutos || 0) / dbStats.centros_creados) * 100) : 0}%` }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Universidad progress bar */}
+                        <div>
+                          <div className="flex justify-between text-xs font-mono mb-1">
+                            <span className="text-zinc-400 flex items-center gap-1.5">
+                              <GraduationCap className="w-3.5 h-3.5 text-zinc-500" />
+                              Universidades
+                            </span>
+                            <span className="text-zinc-300 font-bold">{dbStats?.universidades || 0}</span>
+                          </div>
+                          <div className="h-1.5 w-full bg-zinc-900 rounded-full overflow-hidden">
+                            <div 
+                              className="h-full bg-blue-500 rounded-full transition-all duration-500" 
+                              style={{ width: `${dbStats?.centros_creados ? Math.min(100, ((dbStats.universidades || 0) / dbStats.centros_creados) * 100) : 0}%` }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Colegio progress bar */}
+                        <div>
+                          <div className="flex justify-between text-xs font-mono mb-1">
+                            <span className="text-zinc-400 flex items-center gap-1.5">
+                              <School className="w-3.5 h-3.5 text-zinc-500" />
+                              Colegios
+                            </span>
+                            <span className="text-zinc-300 font-bold">{dbStats?.colegios || 0}</span>
+                          </div>
+                          <div className="h-1.5 w-full bg-zinc-900 rounded-full overflow-hidden">
+                            <div 
+                              className="h-full bg-purple-500 rounded-full transition-all duration-500" 
+                              style={{ width: `${dbStats?.centros_creados ? Math.min(100, ((dbStats.colegios || 0) / dbStats.centros_creados) * 100) : 0}%` }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Usuarios Card */}
+                    <div className="bg-zinc-950 border border-zinc-900 rounded-2xl p-6 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Users className="w-5 h-5 text-yellow-400" />
+                          <h4 className="text-sm font-display font-bold text-white">Usuarios de la Plataforma</h4>
+                        </div>
+                        <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800">Firebase Auth</span>
+                      </div>
+
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-4xl font-mono font-bold text-white">
+                          {dbStats ? (dbStats.usuarios_anonimos + dbStats.usuarios_google) : '...'}
+                        </span>
+                        <span className="text-xs text-zinc-500 font-mono">cuentas en total</span>
+                      </div>
+
+                      <div className="space-y-4 pt-2">
+                        {/* Google Auth user count */}
+                        <div className="flex items-center justify-between p-3 bg-[#0d0d0f] border border-zinc-900 rounded-xl">
+                          <div className="flex items-center gap-2">
+                            <div className="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse" />
+                            <div className="text-xs font-mono">
+                              <div className="text-white font-bold">Iniciados con Google</div>
+                              <div className="text-[10px] text-zinc-500">Cuentas sociales verificadas</div>
+                            </div>
+                          </div>
+                          <span className="text-lg font-mono font-bold text-white">{dbStats?.usuarios_google || 0}</span>
+                        </div>
+
+                        {/* Anonymous user count */}
+                        <div className="flex items-center justify-between p-3 bg-[#0d0d0f] border border-zinc-900 rounded-xl">
+                          <div className="flex items-center gap-2">
+                            <div className="w-2.5 h-2.5 rounded-full bg-zinc-500" />
+                            <div className="text-xs font-mono">
+                              <div className="text-white font-bold">Accesos Anónimos</div>
+                              <div className="text-[10px] text-zinc-500">Sesiones de invitado activas</div>
+                            </div>
+                          </div>
+                          <span className="text-lg font-mono font-bold text-white">{dbStats?.usuarios_anonimos || 0}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ADMIN GEOLOCATION CARD */}
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    {/* Left: Metadata & Coordinates */}
+                    <div className="lg:col-span-1 bg-zinc-950 border border-zinc-900 rounded-2xl p-5 flex flex-col justify-between space-y-4">
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <h4 className="text-xs uppercase font-mono tracking-wider font-bold text-zinc-400 flex items-center gap-1.5">
+                            <Navigation className="w-3.5 h-3.5 text-yellow-400 animate-pulse" />
+                            <span>Ubicación Admin</span>
+                          </h4>
+                          <span className={`px-2 py-0.5 rounded text-[8px] font-mono font-bold tracking-tight ${
+                            adminLocation?.error 
+                              ? 'bg-yellow-400/10 text-yellow-400 border border-yellow-400/20' 
+                              : adminLocation 
+                                ? 'bg-green-500/10 text-green-400 border border-green-500/20' 
+                                : 'bg-zinc-900 text-zinc-500 border border-zinc-800'
+                          }`}>
+                            {adminLocation?.error 
+                              ? 'SIMULACIÓN' 
+                              : adminLocation 
+                                ? 'GPS ACTIVO' 
+                                : 'BUSCANDO...'}
+                          </span>
+                        </div>
+
+                        <p className="text-xs text-zinc-400 font-mono leading-relaxed mb-4">
+                          Coordenadas geográficas en tiempo real del dispositivo administrador para auditoría de inicio de sesión y control territorial.
+                        </p>
+
+                        <div className="space-y-2.5 font-mono text-xs">
+                          <div className="bg-[#0b0b0c] border border-zinc-900/60 rounded-xl p-3 space-y-1.5">
+                            <div className="flex justify-between items-center text-[10px]">
+                              <span className="text-zinc-500">LATITUD</span>
+                              <span className="text-white font-bold">{adminLocation?.lat ? adminLocation.lat.toFixed(6) : '-12.046374'}</span>
+                            </div>
+                            <div className="flex justify-between items-center text-[10px]">
+                              <span className="text-zinc-500">LONGITUD</span>
+                              <span className="text-white font-bold">{adminLocation?.lon ? adminLocation.lon.toFixed(6) : '-77.042793'}</span>
+                            </div>
+                            <div className="flex justify-between items-center text-[10px]">
+                              <span className="text-zinc-500">PRECISIÓN</span>
+                              <span className="text-white font-bold">
+                                {adminLocation?.accuracy ? `±${adminLocation.accuracy.toFixed(1)}m` : 'N/A (Fija)'}
+                              </span>
+                            </div>
+                          </div>
+
+                          {adminLocation?.error && (
+                            <div className="bg-yellow-400/5 border border-yellow-400/10 rounded-xl p-3 text-[10px] text-yellow-300/80 leading-relaxed">
+                              ⚠️ {adminLocation.error}
+                            </div>
+                          )}
+
+                          <div className="flex items-center gap-2 text-[10px] text-zinc-500 pt-1.5">
+                            <Globe className="w-3.5 h-3.5" />
+                            <span>Región: {adminLocation?.error ? 'Lima, Perú (Sede Central)' : 'Ubicación local detectada'}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          setAdminLocation(null);
+                          navigator.geolocation.getCurrentPosition(
+                            (pos) => setAdminLocation({ lat: pos.coords.latitude, lon: pos.coords.longitude, accuracy: pos.coords.accuracy, error: null }),
+                            (err) => setAdminLocation({ lat: -12.046374, lon: -77.042793, accuracy: null, error: "Permiso denegado o expirado." }),
+                            { enableHighAccuracy: true, timeout: 5000 }
+                          );
+                        }}
+                        className="w-full text-center font-mono text-[10px] uppercase font-bold tracking-wider text-zinc-400 hover:text-white border border-zinc-900 hover:border-zinc-800 bg-[#0c0c0d] hover:bg-zinc-900 px-3 py-2.5 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <Compass className="w-3.5 h-3.5 text-yellow-400" />
+                        <span>Recargar Coordenadas GPS</span>
+                      </button>
+                    </div>
+
+                    {/* Right: Map Iframe Embed */}
+                    <div className="lg:col-span-2 bg-zinc-950 border border-zinc-900 rounded-2xl p-4 flex flex-col justify-between h-[320px] lg:h-auto min-h-[280px]">
+                      <div className="w-full h-full rounded-xl overflow-hidden border border-zinc-900 relative bg-[#0d0d0e]">
+                        <iframe 
+                          title="Ubicación del Administrador"
+                          src={`https://www.openstreetmap.org/export/embed.html?bbox=${(adminLocation?.lon || -77.042793) - 0.005}%2C${(adminLocation?.lat || -12.046374) - 0.005}%2C${(adminLocation?.lon || -77.042793) + 0.005}%2C${(adminLocation?.lat || -12.046374) + 0.005}&layer=mapnik&marker=${adminLocation?.lat || -12.046374}%2C${adminLocation?.lon || -77.042793}`}
+                          className="w-full h-full border-none opacity-80 hover:opacity-100 transition-opacity"
+                          allowFullScreen
+                          loading="lazy"
+                        />
+                        <div className="absolute top-2 right-2 bg-black/80 backdrop-blur-md border border-zinc-900 px-2.5 py-1 rounded-lg text-[9px] font-mono text-zinc-400 select-none">
+                          📍 Mapa del Servidor Central
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h4 className="text-xs uppercase font-mono tracking-wider font-bold text-zinc-400 mb-4 flex items-center gap-2">
+                      <span>Últimos Murmullos del Campus</span>
+                    </h4>
+                    {comments.length === 0 ? (
+                      <p className="text-xs text-zinc-500 font-mono py-4 text-center">No hay comentarios en la plataforma.</p>
+                    ) : (
+                      <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
+                        {comments.slice(0, 5).map(c => (
+                          <div key={c.id} className="bg-zinc-950 border border-zinc-900 rounded-2xl p-4 flex items-start justify-between gap-4">
+                            <div className="space-y-1.5 flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-xs font-bold text-yellow-300 font-mono">{c.authorName}</span>
+                                <span className="text-[10px] text-zinc-500 font-mono">{c.authorNickname}</span>
+                                <span className="text-[9px] text-zinc-600 font-mono">{new Date(c.createdAt).toLocaleDateString()}</span>
+                              </div>
+                              <p className="text-xs text-zinc-300 leading-relaxed break-words">{c.text}</p>
+                            </div>
+                            <button
+                              onClick={() => handleDeleteComment(c.id)}
+                              className="text-red-500 hover:text-red-400 p-2 hover:bg-red-500/10 rounded-lg transition-colors cursor-pointer shrink-0"
+                              title="Eliminar comentario"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 2: INSTITUTES */}
+              {adminActiveTab === 'institutes' && (
+                <div className="space-y-6">
+                  <div className="flex justify-between items-center pb-4 border-b border-zinc-900 mb-2">
+                    <h3 className="font-display font-bold text-lg text-white">Centros Educativos</h3>
+                    <button
+                      onClick={() => setIsCreateInstituteModalOpen(true)}
+                      className="bg-yellow-400 text-black hover:bg-yellow-300 text-xs font-bold font-mono tracking-wider px-3 py-2 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Agregar Centro
+                    </button>
+                  </div>
+
+                  {institutes.length === 0 ? (
+                    <p className="text-xs text-zinc-500 font-mono py-8 text-center">No hay instituciones registradas.</p>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {institutes.map(inst => (
+                        <div key={inst.id} className="bg-zinc-950 border border-zinc-900 rounded-2xl p-4 flex items-center gap-4">
+                          <img 
+                            src={inst.image || "https://images.unsplash.com/photo-1541339907198-e08756dedf3f?auto=format&fit=crop&q=80&w=300"} 
+                            alt={inst.name} 
+                            className="w-14 h-14 rounded-xl object-cover shrink-0 border border-zinc-800"
+                            referrerPolicy="no-referrer"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <h4 className="text-xs font-bold text-white truncate">{inst.name}</h4>
+                            <p className="text-[10px] text-zinc-500 font-mono mt-0.5 truncate">{inst.location}</p>
+                            <div className="flex items-center gap-3 mt-2 text-[10px] font-mono text-yellow-400">
+                              <span>📅 Fundada: {inst.anoDeFundacion || 'N/A'}</span>
+                              <span>🆔 ID: {inst.id}</span>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => handleDeleteInstitute(inst.id)}
+                            className="text-red-500 hover:text-red-400 p-2.5 hover:bg-red-500/10 rounded-xl transition-colors cursor-pointer"
+                            title="Eliminar centro"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* TAB 3: ALUMNOS */}
+              {adminActiveTab === 'alumnos' && (
+                <div className="space-y-6">
+                  <div className="pb-4 border-b border-zinc-900 mb-2">
+                    <h3 className="font-display font-bold text-lg text-white">Pasaportes Estudiantiles</h3>
+                  </div>
+
+                  {alumnos.length === 0 ? (
+                    <p className="text-xs text-zinc-500 font-mono py-8 text-center">No hay alumnos nominados o creados.</p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs font-mono">
+                        <thead>
+                          <tr className="border-b border-zinc-900 text-zinc-500 font-bold uppercase tracking-wider text-[9px] pb-3">
+                            <th className="py-3 px-2">Alumno</th>
+                            <th className="py-3 px-2">Categoría</th>
+                            <th className="py-3 px-2">Sede / Curso</th>
+                            <th className="py-3 px-2 text-center">WikiScore</th>
+                            <th className="py-3 px-2 text-center">Verificación</th>
+                            <th className="py-3 px-2 text-right">Acciones</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-zinc-900/60">
+                          {alumnos.map(al => {
+                            const inst = institutes.find(i => i.id === al.instituteId);
+                            return (
+                              <tr key={al.id} className="hover:bg-zinc-950/40">
+                                <td className="py-3 px-2 flex items-center gap-2.5 min-w-[200px]">
+                                  <img 
+                                    src={al.avatar || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=100"} 
+                                    alt={al.name} 
+                                    className="w-8 h-8 rounded-full object-cover shrink-0 border border-zinc-800"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                  <div>
+                                    <p className="font-bold text-white text-xs">{al.name}</p>
+                                    <p className="text-[10px] text-zinc-500">@{al.nickname || 'sin-user'}</p>
+                                  </div>
+                                </td>
+                                <td className="py-3 px-2">
+                                  <span className="bg-zinc-900 text-zinc-400 px-2 py-0.5 rounded text-[9px] font-bold">
+                                    {al.category}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-2 max-w-[150px] truncate">
+                                  <p className="text-zinc-300 truncate">{inst ? inst.shortName : 'N/A'}</p>
+                                  <p className="text-[10px] text-zinc-500 truncate">{al.course}</p>
+                                </td>
+                                <td className="py-3 px-2 text-center text-yellow-400 font-bold">
+                                  🔥 {al.points}
+                                </td>
+                                <td className="py-3 px-2 text-center">
+                                  <button
+                                    onClick={() => handleToggleVerifyAlumno(al)}
+                                    className={`px-2 py-1 rounded text-[9px] font-bold cursor-pointer transition-all ${
+                                      al.isVerified 
+                                        ? 'bg-yellow-400/10 text-yellow-400 border border-yellow-400/20' 
+                                        : 'bg-zinc-900 text-zinc-600 border border-zinc-800'
+                                    }`}
+                                  >
+                                    {al.isVerified ? 'VERIFICADO' : 'SIN VERIFICAR'}
+                                  </button>
+                                </td>
+                                <td className="py-3 px-2 text-right">
+                                  <button
+                                    onClick={() => handleDeleteAlumno(al.id)}
+                                    className="text-red-500 hover:text-red-400 p-2 hover:bg-red-500/10 rounded-lg transition-colors cursor-pointer"
+                                    title="Eliminar Alumno"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* TAB 4: PROFESORES */}
+              {adminActiveTab === 'profesores' && (
+                <div className="space-y-6">
+                  <div className="pb-4 border-b border-zinc-900 mb-2">
+                    <h3 className="font-display font-bold text-lg text-white">Docentes de la Comunidad</h3>
+                  </div>
+
+                  {perfiles.length === 0 ? (
+                    <p className="text-xs text-zinc-500 font-mono py-8 text-center">No hay profesores calificados o registrados.</p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs font-mono">
+                        <thead>
+                          <tr className="border-b border-zinc-900 text-zinc-500 font-bold uppercase tracking-wider text-[9px] pb-3">
+                            <th className="py-3 px-2">Docente</th>
+                            <th className="py-3 px-2">Especialidad</th>
+                            <th className="py-3 px-2">Sede</th>
+                            <th className="py-3 px-2 text-center">Calificación</th>
+                            <th className="py-3 px-2 text-right">Acciones</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-zinc-900/60">
+                          {perfiles.map(p => {
+                            const inst = institutes.find(i => i.id === p.instituteId);
+                            return (
+                              <tr key={p.id} className="hover:bg-zinc-950/40">
+                                <td className="py-3 px-2 min-w-[200px]">
+                                  <p className="font-bold text-white text-xs">{p.nombreCompleto || p.name}</p>
+                                  <p className="text-[10px] text-zinc-500">Género: {p.sexo || 'N/A'}</p>
+                                </td>
+                                <td className="py-3 px-2 text-zinc-300">
+                                  {p.materia || 'General'}
+                                </td>
+                                <td className="py-3 px-2 max-w-[150px] truncate text-zinc-400">
+                                  {inst ? inst.name : 'ID: ' + p.instituteId}
+                                </td>
+                                <td className="py-3 px-2 text-center text-yellow-400 font-bold">
+                                  ★ {typeof p.rating === 'number' ? p.rating.toFixed(1) : (p.rating || 'N/A')}
+                                </td>
+                                <td className="py-3 px-2 text-right">
+                                  <button
+                                    onClick={() => handleDeleteProfessor(p.id, p.instituteId)}
+                                    className="text-red-500 hover:text-red-400 p-2 hover:bg-red-500/10 rounded-lg transition-colors cursor-pointer"
+                                    title="Eliminar Docente"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* TAB 5: COMMENTS */}
+              {adminActiveTab === 'comments' && (
+                <div className="space-y-6">
+                  <div className="pb-4 border-b border-zinc-900 mb-2">
+                    <h3 className="font-display font-bold text-lg text-white">Moderación de Murmullos</h3>
+                  </div>
+
+                  {comments.length === 0 ? (
+                    <p className="text-xs text-zinc-500 font-mono py-8 text-center">No hay comentarios o murmullos publicados.</p>
+                  ) : (
+                    <div className="space-y-3 pr-2">
+                      {comments.map(c => (
+                        <div key={c.id} className="bg-zinc-950 border border-zinc-900 rounded-2xl p-4 flex items-start justify-between gap-4">
+                          <div className="space-y-1.5 flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-xs font-bold text-yellow-300 font-mono">{c.authorName}</span>
+                              <span className="text-[10px] text-zinc-500 font-mono">{c.authorNickname}</span>
+                              <span className="bg-zinc-900 text-zinc-500 px-1.5 py-0.5 rounded text-[9px] font-bold">
+                                {c.statusType}
+                              </span>
+                              <span className="text-[9px] text-zinc-600 font-mono">{new Date(c.createdAt).toLocaleString()}</span>
+                            </div>
+                            <p className="text-xs text-zinc-300 leading-relaxed break-words">{c.text}</p>
+                          </div>
+                          <button
+                            onClick={() => handleDeleteComment(c.id)}
+                            className="text-red-500 hover:text-red-400 p-2.5 hover:bg-red-500/10 rounded-xl transition-colors cursor-pointer shrink-0"
+                            title="Eliminar Comentario"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
             </div>
           </motion.div>
@@ -5413,11 +6327,23 @@ export default function App() {
 
       {/* --- BOTTOM NAVIGATION --- */}
       <div className="fixed bottom-0 left-0 right-0 z-[100] bg-black border-t border-zinc-900 flex justify-around p-3">
-        <button onClick={() => setActiveBottomTab('feed')} className={`flex flex-col items-center gap-1 ${activeBottomTab === 'feed' ? 'text-yellow-400' : 'text-zinc-500'}`}>
+        <button 
+          onClick={() => {
+            setActiveBottomTab('feed');
+            setIsAdminView(false);
+          }} 
+          className={`flex flex-col items-center gap-1 cursor-pointer ${activeBottomTab === 'feed' && !isAdminView ? 'text-yellow-400' : 'text-zinc-500'}`}
+        >
           <Home className="w-5 h-5" />
           <span className="text-[10px] uppercase font-bold">Feed</span>
         </button>
-        <button onClick={() => setActiveBottomTab('profile')} className={`flex flex-col items-center gap-1 ${activeBottomTab === 'profile' ? 'text-yellow-400' : 'text-zinc-500'}`}>
+        <button 
+          onClick={() => {
+            setActiveBottomTab('profile');
+            setIsAdminView(false);
+          }} 
+          className={`flex flex-col items-center gap-1 cursor-pointer ${activeBottomTab === 'profile' && !isAdminView ? 'text-yellow-400' : 'text-zinc-500'}`}
+        >
           <User className="w-5 h-5" />
           <span className="text-[10px] uppercase font-bold">Mi Perfil</span>
         </button>

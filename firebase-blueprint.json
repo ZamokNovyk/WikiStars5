@@ -67,6 +67,7 @@
         "anoDeFundacion": { "type": "null" },
         "perfilPhotoUrl": { "type": "string" },
         "portadaPhotoUrl": { "type": "string" },
+        "totalProfesores": { "type": "number" },
         "redesSociales": {
           "type": "object",
           "properties": {
@@ -81,6 +82,20 @@
         }
       },
       "required": ["nombre", "tipo", "creadoPor", "creadoEn", "perfilPhotoUrl", "portadaPhotoUrl", "searchKeywords", "searchTokens"]
+    },
+    "Estadistica": {
+      "title": "Estadistica",
+      "description": "Estadísticas y contadores globales de la plataforma.",
+      "type": "object",
+      "properties": {
+        "centros_creados": { "type": "number" },
+        "institutos": { "type": "number" },
+        "universidades": { "type": "number" },
+        "colegios": { "type": "number" },
+        "usuarios_anonimos": { "type": "number" },
+        "usuarios_google": { "type": "number" }
+      },
+      "required": ["centros_creados", "institutos", "universidades", "colegios", "usuarios_anonimos", "usuarios_google"]
     },
     "Profesor": {
       "title": "Profesor",
@@ -123,6 +138,10 @@
     "/users/{userId}": {
       "schema": "User",
       "description": "Colección de usuarios con pasaportes autenticados por Google."
+    },
+    "/estadisticas/{estadisticaId}": {
+      "schema": "Estadistica",
+      "description": "Estadísticas globales de uso y registro de la plataforma."
     }
   }
 }
