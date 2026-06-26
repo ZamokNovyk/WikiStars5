@@ -16,8 +16,8 @@ export default defineConfig(() => {
           type: 'module',
         },
         manifest: {
-          name: 'WikiStars 5 | Popularidad Estudiantil',
-          short_name: 'WikiStars5',
+          name: 'Starryz5 | Popularidad Estudiantil',
+          short_name: 'Starryz5',
           description: 'Foro democrático estudiantil para registrar y reconocer las calificaciones de los profesores.',
           theme_color: '#facb15',
           background_color: '#09090b',
@@ -48,7 +48,10 @@ export default defineConfig(() => {
         workbox: {
           globPatterns: ['**/*.{js,css,html,ico,png,svg,jpg,jpeg,json}'],
           navigateFallback: '/index.html',
-          navigateFallbackDenylist: [/^\/api/]
+          navigateFallbackDenylist: [/^\/api/],
+          skipWaiting: true,
+          clientsClaim: true,
+          cleanupOutdatedCaches: true
         }
       })
     ],

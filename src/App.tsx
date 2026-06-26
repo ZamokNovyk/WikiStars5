@@ -495,7 +495,7 @@ export default function App() {
     const handleAppInstalled = () => {
       setIsAppInstalled(true);
       setDeferredPrompt(null);
-      triggerNotice('🎉 ¡Fabuloso! WikiStars 5 se ha instalado con éxito.');
+      triggerNotice('🎉 ¡Fabuloso! Starryz5 se ha instalado con éxito.');
     };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
@@ -520,7 +520,7 @@ export default function App() {
       deferredPrompt.prompt();
       const { outcome } = await deferredPrompt.userChoice;
       if (outcome === 'accepted') {
-        triggerNotice('¡Instalación aceptada! Disfruta de WikiStars 5.');
+        triggerNotice('¡Instalación aceptada! Disfruta de Starryz5.');
       } else {
         triggerNotice('Instalación cancelada.');
       }
@@ -1527,7 +1527,7 @@ export default function App() {
             profileData = {
               userId: firebaseUser.uid,
               name: data.displayName || firebaseUser.displayName || 'Estudiante',
-              nickname: data.email ? data.email.split('@')[0] : 'wikistar',
+              nickname: data.email ? data.email.split('@')[0] : 'starryz',
               email: data.email || firebaseUser.email || '',
               photoURL: data.photoURL || firebaseUser.photoURL || '',
               instituteId: data.instituteId || '1',
@@ -1538,7 +1538,7 @@ export default function App() {
             const now = new Date();
             const newUserDoc = {
               uid: firebaseUser.uid,
-              displayName: firebaseUser.displayName || (firebaseUser.isAnonymous ? 'Usuario Anónimo' : 'WikiStars User'),
+              displayName: firebaseUser.displayName || (firebaseUser.isAnonymous ? 'Usuario Anónimo' : 'Starryz5 User'),
               email: firebaseUser.email || '',
               photoURL: firebaseUser.photoURL || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=100',
               createdAt: now,
@@ -1866,7 +1866,7 @@ export default function App() {
       const docSnap = await getDoc(userDocRef);
       const now = new Date();
       
-      const finalDisplayName = user.displayName || 'WikiStars User';
+      const finalDisplayName = user.displayName || 'Starryz5 User';
       const finalPhotoURL = user.photoURL || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=100';
       
       if (docSnap.exists()) {
@@ -1890,7 +1890,7 @@ export default function App() {
       const userProfile = {
         userId: user.uid,
         name: finalDisplayName,
-        nickname: user.email ? user.email.split('@')[0] : 'wikistar',
+        nickname: user.email ? user.email.split('@')[0] : 'starryz',
         email: user.email || '',
         photoURL: finalPhotoURL,
         instituteId: '1',
@@ -1899,8 +1899,8 @@ export default function App() {
       
       setCurrentUser(userProfile);
       setIsJoinModalOpen(false);
-      triggerNotice(`¡Bienvenido a WikiStars 5, ${userProfile.name}!`);
-      pushSocialLog(`🚀 @${userProfile.nickname} se ha unido a WikiStars5`);
+      triggerNotice(`¡Bienvenido a Starryz5, ${userProfile.name}!`);
+      pushSocialLog(`🚀 @${userProfile.nickname} se ha unido a Starryz5`);
     } catch (error) {
       console.error("Error signing in with Google:", error);
       triggerNotice("Error al iniciar sesión con Google o faltan permisos.");
@@ -1922,8 +1922,8 @@ export default function App() {
 
     setCurrentUser(userProfile);
     setIsJoinModalOpen(false);
-    triggerNotice(`¡Bienvenido a WikiStars5, ${userProfile.name}! Ya tienes tu Pasaporte del Campus.`);
-    pushSocialLog(`🚀 @${userProfile.nickname} se ha unido to WikiStars5`);
+    triggerNotice(`¡Bienvenido a Starryz5, ${userProfile.name}! Ya tienes tu Pasaporte del Campus.`);
+    pushSocialLog(`🚀 @${userProfile.nickname} se ha unido a Starryz5`);
   };
 
   // Handle logout
@@ -2429,13 +2429,13 @@ export default function App() {
             <div className="w-10 h-10 bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden flex items-center justify-center transition-all duration-300 group-hover:scale-105 active:scale-95 shadow-[0_0_20px_rgba(250,204,21,0.15)]">
               <img 
                 src="https://firebasestorage.googleapis.com/v0/b/wikistars5-465e1.firebasestorage.app/o/wikistars5logo.png?alt=media&token=026f822e-3b69-4538-b0ef-28dacb65551e" 
-                alt="WikiStars Logo" 
+                alt="Starryz5 Logo" 
                 className="w-full h-full object-cover"
                 referrerPolicy="no-referrer"
               />
             </div>
             <div className="flex items-baseline font-display text-lg tracking-widest font-black text-white">
-              WIKISTARS
+              STARRYZ
               <span className="text-yellow-400 ml-1 text-2xl font-black drop-shadow-[0_0_10px_rgba(250,204,21,0.5)]">5</span>
             </div>
           </div>
@@ -2825,7 +2825,7 @@ export default function App() {
                 <div>
                   <h4 className="font-display font-bold text-white text-sm">¿Cómo funciona la wiki social?</h4>
                   <p className="text-xs text-zinc-400 mt-2 leading-relaxed">
-                    WikiStars5 permite a alumnos registrar institutos y votar democráticamente por estudiantes ejemplares en redes, deportes, estudios o artes. Es moderado y busca rescatar el talento local con un espíritu competitivo y sano.
+                    Starryz5 permite a alumnos registrar institutos y votar democráticamente por estudiantes ejemplares en redes, deportes, estudios o artes. Es moderado y busca rescatar el talento local con un espíritu competitivo y sano.
                   </p>
                 </div>
               </div>
@@ -3871,7 +3871,7 @@ export default function App() {
                         TABLERO DE ESTADÍSTICAS Y RACHAS DIARIAS
                       </h3>
                       <p className="text-xs text-zinc-400 font-sans">
-                        Reclama tus puntos diarios de WikiStars y compite por mantener viva tu racha en Uchiza.
+                        Reclama tus puntos diarios de Starryz y compite por mantener viva tu racha en Uchiza.
                       </p>
                     </div>
 
@@ -3887,7 +3887,7 @@ export default function App() {
                     <div className="space-y-4 md:col-span-2">
                       <h4 className="font-sans font-bold text-xs text-zinc-200 uppercase tracking-wider">¿Por qué es importante una racha?</h4>
                       <p className="text-xs sm:text-sm text-zinc-400 leading-relaxed font-sans font-medium">
-                        WikiStars5 promueve la participation activa de los alumnos. Aquellos compañeros que visiten la applet de manera cotidiana, voten, comenten constructivamente o sugieran nuevas estrellas de Uchiza obtienen rachas y recompensas que elevan el prestigio de su instituto.
+                        Starryz5 promueve la participation activa de los alumnos. Aquellos compañeros que visiten la applet de manera cotidiana, voten, comenten constructivamente o sugieran nuevas estrellas de Uchiza obtienen rachas y recompensas que elevan el prestigio de su instituto.
                       </p>
 
                       <div className="bg-[#121214]/60 border border-zinc-900 p-5 rounded-xl text-center space-y-3">
@@ -4090,7 +4090,7 @@ export default function App() {
                   MÁXIMO CONTROL DE CALIFICACIONES
                 </h3>
                 <p className="text-zinc-500 text-xs mt-1 leading-relaxed font-sans font-medium">
-                  Califica individualmente bajo los estándares fundamentales de WikiStars5. Tu voto recalculará el promedio de la wiki escolar de {currentSelectedAlumno.name} en tiempo real.
+                  Califica individualmente bajo los estándares fundamentales de Starryz5. Tu voto recalculará el promedio de la wiki escolar de {currentSelectedAlumno.name} en tiempo real.
                 </p>
               </div>
 
@@ -4193,7 +4193,7 @@ export default function App() {
                   MURMULLOS DEL CAMPUS ({currentAlumnoComments.length})
                 </h3>
                 <span className="text-[10px] font-mono font-bold uppercase text-zinc-500 tracking-wider">
-                  Moderación activa WikiStars
+                  Moderación activa Starryz
                 </span>
               </div>
 
@@ -5055,7 +5055,7 @@ export default function App() {
                   
                   <div className="bg-zinc-950 border border-zinc-900 p-5 rounded-2xl space-y-4">
                     <p className="text-xs text-zinc-400 font-mono leading-relaxed">
-                      ¡Bienvenido al Panel de Control! Aquí puedes auditar y moderar el contenido del campus educativo de WikiStars5 de manera directo e irrevocable. Todas las operaciones realizadas en esta consola impactarán instantáneamente la base de datos de producción de Firebase.
+                      ¡Bienvenido al Panel de Control! Aquí puedes auditar y moderar el contenido del campus educativo de Starryz5 de manera directo e irrevocable. Todas las operaciones realizadas en esta consola impactarán instantáneamente la base de datos de producción de Firebase.
                     </p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-mono">
                       <div className="flex items-center gap-2 text-zinc-500">
@@ -5570,18 +5570,18 @@ export default function App() {
             <div className="w-8 h-8 rounded-lg bg-zinc-900 border border-zinc-800 overflow-hidden flex items-center justify-center shadow-[0_0_10px_rgba(250,204,21,0.05)]">
               <img 
                 src="https://firebasestorage.googleapis.com/v0/b/wikistars5-465e1.firebasestorage.app/o/wikistars5logo.png?alt=media&token=026f822e-3b69-4538-b0ef-28dacb65551e" 
-                alt="WikiStars Logo" 
+                alt="Starryz5 Logo" 
                 className="w-full h-full object-cover"
                 referrerPolicy="no-referrer"
               />
             </div>
-            <span className="font-display font-black text-white text-xs tracking-widest uppercase">WIKISTARS 5</span>
+            <span className="font-display font-black text-white text-xs tracking-widest uppercase">STARRYZ 5</span>
           </div>
           <p className="max-w-md mx-auto leading-relaxed text-[11px] text-zinc-500 font-sans font-medium">
             Foro democrático estudiantil para registrar y reconocer las estrellas más valoradas del centro educativo. Diseñado en amarillo y negro.
           </p>
           <div className="pt-4 border-t border-zinc-950 flex flex-col sm:flex-row items-center justify-between gap-4 text-[10px] text-zinc-550">
-            <span>© 2026 WikiStars5 Corporation. Sin fines de lucro.</span>
+            <span>© 2026 Starryz5 Corporation. Sin fines de lucro.</span>
             <span>Versión 1.0 (Fase Frontend de Pruebas de Calificación)</span>
           </div>
         </div>
