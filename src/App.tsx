@@ -493,6 +493,9 @@ export default function App() {
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [isAppInstalled, setIsAppInstalled] = useState(false);
 
+  // Check if current user is signed in with Google (not anonymous and has authentic session)
+  const isGoogleUser = !!(auth.currentUser && !auth.currentUser.isAnonymous);
+
   useEffect(() => {
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
@@ -560,10 +563,6 @@ export default function App() {
   const [postAsAnonymous, setPostAsAnonymous] = useState(true);
 
   // Profile Create states
-  const [joinName, setJoinName] = useState('');
-  const [joinNickname, setJoinNickname] = useState('');
-  const [joinInstituteId, setJoinInstituteId] = useState('1');
-  const [joinCategory, setJoinCategory] = useState('Artista');
 
   // Notification Banner
   const [bannerNotice, setBannerNotice] = useState<string | null>(null);
@@ -896,6 +895,13 @@ export default function App() {
   const handleAddProfessor = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedInstituteId || !newProfNombre.trim() || !newProfApellidos.trim()) return;
+
+    if (!isGoogleUser) {
+      triggerNotice("⚠️ Debes iniciar sesión con Google para registrar un profesor.");
+      setIsAddProfessorModalOpen(false);
+      setIsJoinModalOpen(true);
+      return;
+    }
 
     setIsSubmittingProf(true);
     try {
@@ -1852,6 +1858,13 @@ export default function App() {
       return;
     }
 
+    if (!isGoogleUser) {
+      triggerNotice("⚠️ Debes iniciar sesión con Google para registrar un centro educativo.");
+      setIsCreateInstituteModalOpen(false);
+      setIsJoinModalOpen(true);
+      return;
+    }
+
     setIsSubmittingInstitute(true);
     const docId = generateDocId(newInstituteName);
     try {
@@ -1961,24 +1974,6 @@ export default function App() {
   };
 
   // Handle join platform
-  const handleJoinSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!joinName.trim()) return;
-
-    const userProfile = {
-      name: joinName,
-      nickname: joinNickname ? joinNickname.replace('@', '') : joinName.toLowerCase().replace(/\s+/g, ''),
-      instituteId: joinInstituteId,
-      category: joinCategory,
-      userId: `user-${Date.now()}`
-    };
-
-    setCurrentUser(userProfile);
-    setIsJoinModalOpen(false);
-    triggerNotice(`¡Bienvenido a Starryz5, ${userProfile.name}! Ya tienes tu Pasaporte del Campus.`);
-    pushSocialLog(`🚀 @${userProfile.nickname} se ha unido a Starryz5`);
-  };
-
   // Handle logout
   const handleLogout = async () => {
     try {
@@ -3927,7 +3922,14 @@ export default function App() {
                     </div>
 
                     <button
-                      onClick={() => setIsAddProfessorModalOpen(true)}
+                      onClick={() => {
+                        if (!isGoogleUser) {
+                          triggerNotice("⚠️ Debes iniciar sesión con Google para registrar un profesor.");
+                          setIsJoinModalOpen(true);
+                        } else {
+                          setIsAddProfessorModalOpen(true);
+                        }
+                      }}
                       className="bg-yellow-400 text-black hover:bg-yellow-300 font-black text-[11px] px-4 py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all duration-300 font-mono tracking-wider shadow-[0_4px_12px_rgba(250,204,21,0.15)] hover:shadow-[0_4px_18px_rgba(250,204,21,0.25)] hover:-translate-y-0.5 active:translate-y-0 cursor-pointer uppercase shrink-0"
                     >
                       <Plus className="w-4 h-4 text-black" />
@@ -5458,7 +5460,14 @@ export default function App() {
                   <div className="flex justify-between items-center pb-4 border-b border-zinc-900 mb-2">
                     <h3 className="font-display font-bold text-lg text-white">Centros Educativos</h3>
                     <button
-                      onClick={() => setIsCreateInstituteModalOpen(true)}
+                      onClick={() => {
+                        if (!isGoogleUser) {
+                          triggerNotice("⚠️ Debes iniciar sesión con Google para registrar un centro educativo.");
+                          setIsJoinModalOpen(true);
+                        } else {
+                          setIsCreateInstituteModalOpen(true);
+                        }
+                      }}
                       className="bg-yellow-400 text-black hover:bg-yellow-300 text-xs font-bold font-mono tracking-wider px-3 py-2 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
                     >
                       <Plus className="w-3.5 h-3.5" /> Agregar Centro
@@ -5690,9 +5699,14 @@ export default function App() {
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
             onClick={() => {
-              setCreateInstituteStep(1);
-              setNewInstituteName('');
-              setIsCreateInstituteModalOpen(true);
+              if (!isGoogleUser) {
+                triggerNotice("⚠️ Debes iniciar sesión con Google para registrar un centro educativo.");
+                setIsJoinModalOpen(true);
+              } else {
+                setCreateInstituteStep(1);
+                setNewInstituteName('');
+                setIsCreateInstituteModalOpen(true);
+              }
             }}
             className="flex items-center gap-2 bg-yellow-400 hover:bg-yellow-350 text-black font-mono font-black text-xs px-5 py-4 rounded-full shadow-[0_4px_24px_rgba(250,204,21,0.25)] hover:shadow-[0_8px_32px_rgba(250,204,21,0.35)] transition-all cursor-pointer uppercase tracking-wider outline-none"
           >
@@ -5771,53 +5785,10 @@ export default function App() {
                   </svg>
                   <span>INICIAR SESIÓN CON GOOGLE</span>
                 </button>
-
-                <div className="flex items-center gap-3 py-1 select-none">
-                  <div className="h-px bg-zinc-900 flex-1" />
-                  <span className="text-[10px] text-zinc-600 font-mono font-bold tracking-wider uppercase">o pasaporte manual</span>
-                  <div className="h-px bg-zinc-900 flex-1" />
-                </div>
               </div>
 
-              <form onSubmit={handleJoinSubmit} className="space-y-4">
-                {/* Name */}
-                <div className="space-y-1.5">
-                  <label className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-black block">Nombre Completo</label>
-                  <input
-                    type="text"
-                    required
-                    maxLength={35}
-                    value={joinName}
-                    onChange={(e) => setJoinName(e.target.value)}
-                    placeholder="Ej. Sofía Larrea"
-                    className="w-full bg-[#0d0d0d] focus:bg-[#121212] border border-zinc-900 focus:border-yellow-400 text-xs p-3.5 rounded-xl text-zinc-100 outline-none transition-colors duration-200 font-sans font-medium placeholder-zinc-700"
-                  />
-                </div>
-
-                {/* Nickname */}
-                <div className="space-y-1.5">
-                  <label className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-black block">Apodo Estudiantil (Alias)</label>
-                  <input
-                    type="text"
-                    maxLength={20}
-                    value={joinNickname}
-                    onChange={(e) => setJoinNickname(e.target.value)}
-                    placeholder="Ej. SofiPoetry (Opcional)"
-                    className="w-full bg-[#0d0d0d] focus:bg-[#121212] border border-zinc-900 focus:border-yellow-400 text-xs p-3.5 rounded-xl text-zinc-100 outline-none transition-colors duration-200 font-sans font-medium placeholder-zinc-700"
-                  />
-                </div>
-
-
-
-                <button
-                  type="submit"
-                  className="w-full bg-yellow-400 hover:bg-yellow-300 text-black font-mono font-black text-xs py-3.5 rounded-xl transition-all duration-300 uppercase tracking-widest mt-4 cursor-pointer shadow-lg shadow-yellow-400/10 hover:-translate-y-0.5 active:translate-y-0"
-                >
-                  Confirmar Identidad & Unirse
-                </button>
-              </form>
-            </motion.div>
-          </div>
+              </motion.div>
+            </div>
         )}
       </AnimatePresence>
 
@@ -6030,13 +6001,35 @@ export default function App() {
                     </p>
                   </div>
 
+                  {!isGoogleUser && (
+                    <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-3.5 rounded-xl text-xs font-mono text-center space-y-2">
+                      <p>⚠️ Solo los usuarios registrados con Google pueden registrar centros educativos.</p>
+                      <button 
+                        type="button"
+                        onClick={() => {
+                          setIsCreateInstituteModalOpen(false);
+                          setIsJoinModalOpen(true);
+                        }}
+                        className="text-yellow-400 hover:underline font-bold cursor-pointer"
+                      >
+                        Iniciar Sesión con Google
+                      </button>
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-1 gap-3">
                     {/* Option 1: Colegio/Escuela */}
                     <button
                       type="button"
                       onClick={() => {
-                        setNewInstituteTipo('colegio');
-                        setCreateInstituteStep(2);
+                        if (!isGoogleUser) {
+                          triggerNotice("⚠️ Debes iniciar sesión con Google para registrar un centro educativo.");
+                          setIsCreateInstituteModalOpen(false);
+                          setIsJoinModalOpen(true);
+                        } else {
+                          setNewInstituteTipo('colegio');
+                          setCreateInstituteStep(2);
+                        }
                       }}
                       className="flex items-center gap-4 p-4 rounded-2xl border border-zinc-900 bg-zinc-950/40 hover:border-yellow-400/40 hover:bg-[#121214]/60 text-left transition-all duration-300 group cursor-pointer outline-none"
                     >
@@ -6057,8 +6050,14 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => {
-                        setNewInstituteTipo('instituto');
-                        setCreateInstituteStep(2);
+                        if (!isGoogleUser) {
+                          triggerNotice("⚠️ Debes iniciar sesión con Google para registrar un centro educativo.");
+                          setIsCreateInstituteModalOpen(false);
+                          setIsJoinModalOpen(true);
+                        } else {
+                          setNewInstituteTipo('instituto');
+                          setCreateInstituteStep(2);
+                        }
                       }}
                       className="flex items-center gap-4 p-4 rounded-2xl border border-zinc-900 bg-zinc-950/40 hover:border-yellow-400/40 hover:bg-[#121214]/60 text-left transition-all duration-300 group cursor-pointer outline-none"
                     >
@@ -6079,8 +6078,14 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => {
-                        setNewInstituteTipo('universidad');
-                        setCreateInstituteStep(2);
+                        if (!isGoogleUser) {
+                          triggerNotice("⚠️ Debes iniciar sesión con Google para registrar un centro educativo.");
+                          setIsCreateInstituteModalOpen(false);
+                          setIsJoinModalOpen(true);
+                        } else {
+                          setNewInstituteTipo('universidad');
+                          setCreateInstituteStep(2);
+                        }
                       }}
                       className="flex items-center gap-4 p-4 rounded-2xl border border-zinc-900 bg-zinc-950/40 hover:border-yellow-400/40 hover:bg-[#121214]/60 text-left transition-all duration-300 group cursor-pointer outline-none"
                     >
@@ -6170,7 +6175,7 @@ export default function App() {
                       </button>
                       <button
                         type="submit"
-                        disabled={isSubmittingInstitute}
+                        disabled={isSubmittingInstitute || !isGoogleUser}
                         className="w-2/3 bg-yellow-400 hover:bg-yellow-350 disabled:bg-zinc-850 disabled:text-zinc-500 text-black font-mono font-black text-xs py-3.5 rounded-xl transition-all duration-300 uppercase tracking-widest cursor-pointer shadow-lg shadow-yellow-400/10 hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-1.5"
                       >
                         {isSubmittingInstitute ? (
@@ -6225,6 +6230,22 @@ export default function App() {
                   Añade un nuevo docente al directorio de esta institución.
                 </p>
               </div>
+
+              {!isGoogleUser && (
+                <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-3.5 rounded-xl text-xs font-mono text-center space-y-2">
+                  <p>⚠️ Solo los usuarios registrados con Google pueden agregar profesores.</p>
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      setIsAddProfessorModalOpen(false);
+                      setIsJoinModalOpen(true);
+                    }}
+                    className="text-yellow-400 hover:underline font-bold cursor-pointer"
+                  >
+                    Iniciar Sesión con Google
+                  </button>
+                </div>
+              )}
 
               <form onSubmit={handleAddProfessor} className="space-y-4 pt-2">
                 {/* Professor Name */}
@@ -6283,7 +6304,7 @@ export default function App() {
                 <div className="pt-4">
                   <button
                     type="submit"
-                    disabled={isSubmittingProf}
+                    disabled={isSubmittingProf || !isGoogleUser}
                     className="w-full bg-yellow-400 hover:bg-yellow-350 disabled:bg-zinc-850 disabled:text-zinc-500 text-black font-mono font-black text-xs py-3.5 rounded-xl transition-all duration-300 uppercase tracking-widest cursor-pointer shadow-lg shadow-yellow-400/10 hover:-translate-y-0.5 active:translate-y-0"
                   >
                     {isSubmittingProf ? 'Guardando...' : 'Guardar Profesor'}
