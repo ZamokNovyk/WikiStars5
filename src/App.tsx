@@ -2625,9 +2625,6 @@ export default function App() {
               <span className="bg-gradient-to-b from-white to-zinc-400 bg-clip-text text-transparent"> en el campus</span>
             </h1>
             
-            <p className="mt-6 text-zinc-400 max-w-2xl mx-auto text-sm sm:text-base leading-relaxed tracking-wide font-medium">
-              La primera wiki social para calificar y descubrir a los estudiantes más populares e influyentes.
-            </p>
 
             {/* Search Input matching uploaded mockup */}
             <div className="mt-12 max-w-xl mx-auto relative group">
