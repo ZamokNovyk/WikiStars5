@@ -8,7 +8,7 @@ import { registerSW } from 'virtual:pwa-register';
 registerSW({
   immediate: true,
   onNeedRefresh() {
-    console.log('Nueva versión detectada. Recargando aplicación de forma invisible...');
+    console.log('Nueva versión detectada. Actualizando de forma invisible...');
     window.location.reload(); 
   },
   onOfflineReady() {
