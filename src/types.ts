@@ -21,6 +21,7 @@ export interface Institute {
   portadaPhotoUrl?: string;
   anoDeFundacion?: number | null;
   redesSociales?: RedesSociales;
+  tipo?: 'instituto' | 'colegio' | 'universidad';
 }
 
 export interface Alumno {

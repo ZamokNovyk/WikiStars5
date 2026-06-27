@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { ResultadosView } from './components/ResultadosView';
 import { 
   Search, 
   Award, 
@@ -189,7 +190,8 @@ export default function App() {
   const [activeCategoryFilter, setActiveCategoryFilter] = useState<string>('Todos');
 
   // Campus-specific Navigation & View Modes
-  const [activeCampusTab, setActiveCampusTab] = useState<'Wiki' | 'Profesores' | 'Rachas'>('Wiki');
+  const [activeCampusTab, setActiveCampusTab] = useState<'Wiki' | 'Profesores' | 'Rachas' | 'Reinado'>('Wiki');
+  const [showResults, setShowResults] = useState(false);
   const [campusViewMode, setCampusViewMode] = useState<'list' | 'grid'>('list'); // Default to list view as shown in the mockup
   const [studentSortOrder, setStudentSortOrder] = useState<'puntos' | 'nombre' | 'estrellas'>('puntos');
   const [showShareToast, setShowShareToast] = useState(false);
@@ -618,7 +620,8 @@ export default function App() {
           perfilPhotoUrl: data.perfilPhotoUrl || '',
           portadaPhotoUrl: data.portadaPhotoUrl || '',
           anoDeFundacion: data.anoDeFundacion !== undefined ? data.anoDeFundacion : null,
-          redesSociales: data.redesSociales || {}
+          redesSociales: data.redesSociales || {},
+          tipo: data.tipo || (data.nombre?.toLowerCase().includes('colegio') ? 'colegio' : data.nombre?.toLowerCase().includes('universidad') ? 'universidad' : 'instituto')
         });
       });
       setInstitutes(list);
@@ -2474,6 +2477,7 @@ export default function App() {
               setSelectedAlumnoId(null);
               setIsAdminView(false);
               setGlobalSearch('');
+              setShowResults(false);
             }}
           >
             <div className="w-10 h-10 bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden flex items-center justify-center transition-all duration-300 group-hover:scale-105 active:scale-95 shadow-[0_0_20px_rgba(250,204,21,0.15)]">
@@ -2484,11 +2488,60 @@ export default function App() {
                 referrerPolicy="no-referrer"
               />
             </div>
-            <div className="flex items-baseline font-display text-lg tracking-widest font-black text-white">
+            <div className={`items-baseline font-display text-lg tracking-widest font-black text-white ${(showResults || selectedInstituteId || selectedAlumnoId) ? 'hidden sm:flex' : 'flex'}`}>
               STARRYZ
               <span className="text-yellow-400 ml-1 text-2xl font-black drop-shadow-[0_0_10px_rgba(250,204,21,0.5)]">5</span>
             </div>
           </div>
+
+          {/* Header Search Input - matching mockup */}
+          {(showResults || selectedInstituteId || selectedAlumnoId) && (
+            <div className="flex-1 max-w-md mx-2 sm:mx-4 relative flex items-center">
+              <input
+                type="text"
+                value={globalSearch}
+                onChange={(e) => {
+                  setGlobalSearch(e.target.value);
+                  if (e.target.value.trim() === '') {
+                    setShowResults(false);
+                  } else {
+                    setShowResults(true);
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    setShowResults(true);
+                  }
+                }}
+                placeholder="Busca alumnos o instituciones..."
+                className="w-full bg-[#111111] border border-zinc-900 focus:border-yellow-400/50 text-xs py-2 pl-4 pr-16 rounded-full text-white outline-none placeholder-zinc-500 transition-all font-mono"
+              />
+              <div className="absolute right-1 flex items-center gap-1">
+                {globalSearch && (
+                  <button 
+                    onClick={() => {
+                      setGlobalSearch('');
+                      setShowResults(false);
+                    }}
+                    className="p-1.5 text-zinc-500 hover:text-white transition-all cursor-pointer"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    if (globalSearch.trim() !== '') {
+                      setShowResults(true);
+                    }
+                  }}
+                  className="bg-yellow-400 hover:bg-yellow-500 active:scale-95 text-black p-1.5 rounded-full transition-all shadow-[0_0_10px_rgba(250,204,21,0.3)] cursor-pointer flex items-center justify-center mr-0.5"
+                  title="Buscar"
+                >
+                  <Search className="w-3.5 h-3.5 font-bold text-black" />
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Actions & Profiles */}
           <div className="flex items-center gap-3">
@@ -2606,7 +2659,7 @@ export default function App() {
 
       {/* --- HERO BANNER & SEARCH --- */}
       <AnimatePresence mode="wait">
-        {!isAdminView && !selectedInstituteId && !selectedAlumnoId && (
+        {!isAdminView && !selectedInstituteId && !selectedAlumnoId && !showResults && (
           <motion.section 
             id="hero-banner"
             initial={{ opacity: 0, y: 15 }}
@@ -2631,25 +2684,42 @@ export default function App() {
               {/* Animated surrounding glow ring on focus */}
               <div className="absolute inset-0 bg-yellow-400/20 rounded-full blur-xl opacity-0 group-focus-within:opacity-100 transition-opacity duration-500 pointer-events-none" />
               
-              <div className="absolute inset-y-0 left-5 flex items-center pointer-events-none text-zinc-400 group-focus-within:text-yellow-400 transition-colors z-10">
-                <Search className="w-5 h-5" />
-              </div>
               <input
                 id="main-search-input"
                 type="text"
                 value={globalSearch}
-                onChange={(e) => setGlobalSearch(e.target.value)}
+                onChange={(e) => {
+                  setGlobalSearch(e.target.value);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    setShowResults(true);
+                  }
+                }}
                 placeholder="Busca alumnos o instituciones..."
-                className="w-full bg-zinc-950/90 hover:bg-zinc-900/90 focus:bg-zinc-950 border border-zinc-800 focus:border-yellow-400 text-sm py-4.5 pl-13 pr-12 rounded-full text-white outline-none placeholder-zinc-500 transition-all shadow-[0_4px_30px_rgba(0,0,0,0.4)] focus:shadow-[0_0_30px_rgba(250,204,21,0.15)] font-mono tracking-wide relative z-0"
+                className="w-full bg-zinc-950/90 hover:bg-zinc-900/90 focus:bg-zinc-950 border border-zinc-800 focus:border-yellow-400 text-sm py-4.5 pl-6 pr-24 rounded-full text-white outline-none placeholder-zinc-500 transition-all shadow-[0_4px_30px_rgba(0,0,0,0.4)] focus:shadow-[0_0_30px_rgba(250,204,21,0.15)] font-mono tracking-wide relative z-0"
               />
-              {globalSearch && (
-                <button 
-                  onClick={() => setGlobalSearch('')}
-                  className="absolute inset-y-0 right-5 flex items-center text-zinc-400 hover:text-white transition-all z-10 cursor-pointer"
+              <div className="absolute inset-y-0 right-2 flex items-center gap-2 z-10">
+                {globalSearch && (
+                  <button 
+                    onClick={() => setGlobalSearch('')}
+                    className="p-2 text-zinc-400 hover:text-white transition-all cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    if (globalSearch.trim() !== '') {
+                      setShowResults(true);
+                    }
+                  }}
+                  className="bg-yellow-400 hover:bg-yellow-500 active:scale-95 text-black p-3 rounded-full transition-all shadow-[0_0_15px_rgba(250,204,21,0.4)] cursor-pointer flex items-center justify-center mr-1"
+                  title="Buscar"
                 >
-                  <X className="w-4 h-4" />
+                  <Search className="w-4 h-4 font-bold text-black" />
                 </button>
-              )}
+              </div>
             </div>
           </motion.section>
         )}
@@ -2658,8 +2728,24 @@ export default function App() {
       {/* --- CONTENT CONTAINER & ROUTING --- */}
       <main className="max-w-7xl mx-auto px-4 pb-24 z-10 relative">
         
+        {/* VIEW 2: RESULTS VIEW */}
+        {showResults && !isAdminView && !selectedInstituteId && !selectedAlumnoId && (
+          <ResultadosView
+            globalSearch={globalSearch}
+            filteredAlumnosGlobally={filteredAlumnosGlobally}
+            filteredInstitutes={filteredInstitutes}
+            filteredPerfiles={filteredPerfiles}
+            institutes={institutes}
+            setGlobalSearch={setGlobalSearch}
+            setSelectedInstituteId={setSelectedInstituteId}
+            setSelectedAlumnoId={setSelectedAlumnoId}
+            setSelectedProfessorId={setSelectedProfessorId}
+            setShowResults={setShowResults}
+          />
+        )}
+
         {/* VIEW 1: GLOBAL DIRECTORY LISTS */}
-        {!isAdminView && !selectedInstituteId && !selectedAlumnoId && (
+        {!isAdminView && !selectedInstituteId && !selectedAlumnoId && !showResults && (
           <div id="global-directory-view" className="space-y-16">
             
             {/* If user searched, display global search outcomes */}
@@ -3015,6 +3101,9 @@ export default function App() {
             <div className="bg-[#0b0b0c] border border-zinc-900 border-y py-1.5 overflow-x-auto flex items-center gap-1.5 scrollbar-none rounded-xl px-2">
               {[
                 { id: 'Wiki', label: 'Wiki', icon: <BookOpen className="w-3.5 h-3.5" /> },
+                ...(currentSelectedInstitute.name === 'Instituto de Educación Superior Pedagógico Público de Uchiza' 
+                  ? [{ id: 'Reinado', label: 'Reinado', icon: <Crown className="w-3.5 h-3.5" /> }]
+                  : []),
                 { id: 'Profesores', label: 'Profesores', icon: <Shield className="w-3.5 h-3.5" /> },
                 { id: 'Rachas', label: 'Rachas', icon: <Flame className="w-3.5 h-3.5" /> },
               ].map(tab => {

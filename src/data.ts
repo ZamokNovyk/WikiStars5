@@ -10,7 +10,8 @@ export const INITIAL_INSTITUTES: Institute[] = [
     location: 'Campus Este - Distrito de Innovación',
     studentCount: 1420,
     popularCategory: 'Académico & Gaming',
-    ratingAverage: 4.8
+    ratingAverage: 4.8,
+    tipo: 'instituto'
   },
   {
     id: '2',
@@ -21,7 +22,8 @@ export const INITIAL_INSTITUTES: Institute[] = [
     location: 'Plaza Central - Zona Histórica',
     studentCount: 980,
     popularCategory: 'Líder & Artista',
-    ratingAverage: 4.5
+    ratingAverage: 4.5,
+    tipo: 'colegio'
   },
   {
     id: '3',
@@ -32,7 +34,8 @@ export const INITIAL_INSTITUTES: Institute[] = [
     location: 'Avenida de la Cultura - Zona Creativa',
     studentCount: 1250,
     popularCategory: 'Influencer & Artista',
-    ratingAverage: 4.9
+    ratingAverage: 4.9,
+    tipo: 'universidad'
   }
 ];
 
