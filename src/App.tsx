@@ -2801,13 +2801,7 @@ export default function App() {
                     INSTITUCIONES REGISTRADAS
                   </h2>
                 </div>
-                {!globalSearch && (
-                  <div className="flex flex-wrap items-center gap-3 self-start sm:self-auto">
-                    <div className="text-zinc-500 text-[10px] uppercase font-mono bg-zinc-950 px-3.5 py-2.5 rounded-full border border-zinc-900 text-right font-bold tracking-wider shrink-0 select-none">
-                      CONEXIÓN EN VIVO A: <span className="text-yellow-400">{institutes.length} CAMPUSE(S)</span>
-                    </div>
-                  </div>
-                )}
+                {/* Removed live connection badge as requested */}
               </div>
 
               {/* Grid of campuses */}
@@ -5636,9 +5630,7 @@ export default function App() {
             </div>
             <span className="font-display font-black text-white text-xs tracking-widest uppercase">STARRYZ 5</span>
           </div>
-          <p className="max-w-md mx-auto leading-relaxed text-[11px] text-zinc-500 font-sans font-medium">
-            Foro democrático estudiantil para registrar y reconocer las estrellas más valoradas del centro educativo. Diseñado en amarillo y negro.
-          </p>
+          {/* Removed footer description as requested */}
           <div className="pt-4 border-t border-zinc-950 flex flex-col sm:flex-row items-center justify-between gap-4 text-[10px] text-zinc-550">
             <span>© 2026 Starryz5 Corporation. Sin fines de lucro.</span>
             <span>Versión 1.0 (Fase Frontend de Pruebas de Calificación)</span>
