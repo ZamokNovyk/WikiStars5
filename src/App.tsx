@@ -2477,12 +2477,6 @@ export default function App() {
             }}
           >
             <div className="w-10 h-10 bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden flex items-center justify-center transition-all duration-300 group-hover:scale-105 active:scale-95 shadow-[0_0_20px_rgba(250,204,21,0.15)]">
-              <img 
-                src="https://firebasestorage.googleapis.com/v0/b/wikistars5-465e1.firebasestorage.app/o/wikistars5logo.png?alt=media&token=026f822e-3b69-4538-b0ef-28dacb65551e" 
-                alt="Starryz5 Logo" 
-                className="w-full h-full object-cover"
-                referrerPolicy="no-referrer"
-              />
             </div>
             <div className="flex items-baseline font-display text-lg tracking-widest font-black text-white">
               STARRYZ
@@ -5618,20 +5612,11 @@ export default function App() {
         <div className="max-w-7xl mx-auto space-y-4">
           <div className="flex justify-center items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-zinc-900 border border-zinc-800 overflow-hidden flex items-center justify-center shadow-[0_0_10px_rgba(250,204,21,0.05)]">
-              <img 
-                src="https://firebasestorage.googleapis.com/v0/b/wikistars5-465e1.firebasestorage.app/o/wikistars5logo.png?alt=media&token=026f822e-3b69-4538-b0ef-28dacb65551e" 
-                alt="Starryz5 Logo" 
-                className="w-full h-full object-cover"
-                referrerPolicy="no-referrer"
-              />
             </div>
             <span className="font-display font-black text-white text-xs tracking-widest uppercase">STARRYZ 5</span>
           </div>
           {/* Removed footer description as requested */}
-          <div className="pt-4 border-t border-zinc-950 flex flex-col sm:flex-row items-center justify-between gap-4 text-[10px] text-zinc-550">
-            <span>© 2026 Starryz5 Corporation. Sin fines de lucro.</span>
-            <span>Versión 1.0 (Fase Frontend de Pruebas de Calificación)</span>
-          </div>
+
         </div>
       </footer>
 
