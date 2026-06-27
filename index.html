@@ -11,15 +11,17 @@
     <link rel="manifest" href="/manifest.json" />
     <meta name="theme-color" content="#000000" />
     <script>
-      // Script maestro para liberar a los usuarios atrapados en la caché vieja
-      if ('serviceWorker' in navigator) {
+      // Script maestro con "candado" para ejecutarse UNA SOLA VEZ por usuario
+      if ('serviceWorker' in navigator && !localStorage.getItem('sw_cleaned_v1')) {
+        // Marcamos inmediatamente que este navegador ya fue limpiado
+        localStorage.setItem('sw_cleaned_v1', 'true');
+        
         navigator.serviceWorker.getRegistrations().then(function(registrations) {
           for (let registration of registrations) {
             registration.unregister().then(function(clean) {
               if (clean) {
                 console.log('Cache vieja destruida con éxito.');
-                // Fuerza una recarga limpia desde el servidor Express actualizado
-                window.location.reload(true);
+                window.location.reload();
               }
             });
           }

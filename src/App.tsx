@@ -2800,9 +2800,6 @@ export default function App() {
                     <span className="w-1.5 h-6 bg-yellow-400 rounded-full" />
                     INSTITUCIONES REGISTRADAS
                   </h2>
-                  <p className="text-xs text-zinc-400 mt-1 font-sans font-medium">
-                    Ingresa en el foro de tu campus para calificar, nominar y descubrir las celebridades locales.
-                  </p>
                 </div>
                 {!globalSearch && (
                   <div className="flex flex-wrap items-center gap-3 self-start sm:self-auto">
