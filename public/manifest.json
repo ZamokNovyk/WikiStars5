@@ -10,15 +10,15 @@
   "prefer_related_applications": false,
   "icons": [
     {
-      "src": "https://firebasestorage.googleapis.com/v0/b/wikistars5-465e1.firebasestorage.app/o/logofaviicon%20(1).png?alt=media&token=09565681-6f14-44bd-82c8-5afe14e2ff93",
+      "src": "https://firebasestorage.googleapis.com/v0/b/wikistars5-465e1.firebasestorage.app/o/logo%2Festrellados%20192.jpg?alt=media&token=4dd91800-784b-414c-8771-2b3dddb1c47e",
       "sizes": "192x192",
-      "type": "image/png",
+      "type": "image/jpeg",
       "purpose": "any maskable"
     },
     {
-      "src": "https://firebasestorage.googleapis.com/v0/b/wikistars5-465e1.firebasestorage.app/o/logofaviicon.png?alt=media&token=c8a8c4c6-4af6-409c-b80b-5130af52b133",
+      "src": "https://firebasestorage.googleapis.com/v0/b/wikistars5-465e1.firebasestorage.app/o/logo%2Festrellados%20512.jpg?alt=media&token=32134c93-e3ef-4505-beb5-a3ec1ba980ce",
       "sizes": "512x512",
-      "type": "image/png",
+      "type": "image/jpeg",
       "purpose": "any maskable"
     }
   ]
