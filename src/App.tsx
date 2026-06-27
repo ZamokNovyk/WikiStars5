@@ -6477,8 +6477,13 @@ export default function App() {
           onClick={() => {
             setActiveBottomTab('feed');
             setIsAdminView(false);
+            setSelectedInstituteId(null);
+            setSelectedAlumnoId(null);
+            setSelectedProfessorId(null);
+            setGlobalSearch('');
+            setShowResults(false);
           }} 
-          className={`flex flex-col items-center gap-1 cursor-pointer ${activeBottomTab === 'feed' && !isAdminView ? 'text-yellow-400' : 'text-zinc-500'}`}
+          className={`flex flex-col items-center gap-1 cursor-pointer ${activeBottomTab === 'feed' && !isAdminView && !selectedInstituteId && !selectedAlumnoId && !selectedProfessorId ? 'text-yellow-400' : 'text-zinc-500'}`}
         >
           <Home className="w-5 h-5" />
           <span className="text-[10px] uppercase font-bold">Feed</span>
