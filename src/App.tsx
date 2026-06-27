@@ -2470,6 +2470,7 @@ export default function App() {
             onClick={() => {
               setSelectedInstituteId(null);
               setSelectedAlumnoId(null);
+              setSelectedProfessorId(null);
               setIsAdminView(false);
               setGlobalSearch('');
               setShowResults(false);
@@ -3921,20 +3922,15 @@ export default function App() {
                       </p>
                     </div>
 
-                    <button
-                      onClick={() => {
-                        if (!isGoogleUser) {
-                          triggerNotice("⚠️ Debes iniciar sesión con Google para registrar un profesor.");
-                          setIsJoinModalOpen(true);
-                        } else {
-                          setIsAddProfessorModalOpen(true);
-                        }
-                      }}
-                      className="bg-yellow-400 text-black hover:bg-yellow-300 font-black text-[11px] px-4 py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all duration-300 font-mono tracking-wider shadow-[0_4px_12px_rgba(250,204,21,0.15)] hover:shadow-[0_4px_18px_rgba(250,204,21,0.25)] hover:-translate-y-0.5 active:translate-y-0 cursor-pointer uppercase shrink-0"
-                    >
-                      <Plus className="w-4 h-4 text-black" />
-                      AGREGAR PROFESOR 👨‍🏫
-                    </button>
+                    {isGoogleUser && (
+                      <button
+                        onClick={() => setIsAddProfessorModalOpen(true)}
+                        className="bg-yellow-400 text-black hover:bg-yellow-300 font-black text-[11px] px-4 py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all duration-300 font-mono tracking-wider shadow-[0_4px_12px_rgba(250,204,21,0.15)] hover:shadow-[0_4px_18px_rgba(250,204,21,0.25)] hover:-translate-y-0.5 active:translate-y-0 cursor-pointer uppercase shrink-0"
+                      >
+                        <Plus className="w-4 h-4 text-black" />
+                        AGREGAR PROFESOR 👨‍🏫
+                      </button>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -5693,20 +5689,15 @@ export default function App() {
       </main>
 
       {/* Floating Action Button for registering institutions, only shown on main screen */}
-      {!selectedInstituteId && !selectedAlumnoId && (
+      {!selectedInstituteId && !selectedAlumnoId && isGoogleUser && (
         <div className="fixed bottom-24 right-6 z-40">
           <motion.button
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
             onClick={() => {
-              if (!isGoogleUser) {
-                triggerNotice("⚠️ Debes iniciar sesión con Google para registrar un centro educativo.");
-                setIsJoinModalOpen(true);
-              } else {
-                setCreateInstituteStep(1);
-                setNewInstituteName('');
-                setIsCreateInstituteModalOpen(true);
-              }
+              setCreateInstituteStep(1);
+              setNewInstituteName('');
+              setIsCreateInstituteModalOpen(true);
             }}
             className="flex items-center gap-2 bg-yellow-400 hover:bg-yellow-350 text-black font-mono font-black text-xs px-5 py-4 rounded-full shadow-[0_4px_24px_rgba(250,204,21,0.25)] hover:shadow-[0_8px_32px_rgba(250,204,21,0.35)] transition-all cursor-pointer uppercase tracking-wider outline-none"
           >
