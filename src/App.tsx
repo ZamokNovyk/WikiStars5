@@ -139,6 +139,7 @@ export default function App() {
   const [isAdminView, setIsAdminView] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [adminActiveTab, setAdminActiveTab] = useState<'overview' | 'institutes' | 'alumnos' | 'profesores' | 'comments'>('overview');
+  const [adminInstituteSearch, setAdminInstituteSearch] = useState('');
   const [adminPathId, setAdminPathId] = useState<string | null>(null);
   const [adminLocation, setAdminLocation] = useState<{lat: number; lon: number; accuracy: number | null; error: string | null} | null>(null);
   const [dbStats, setDbStats] = useState<{
@@ -620,7 +621,8 @@ export default function App() {
           portadaPhotoUrl: data.portadaPhotoUrl || '',
           anoDeFundacion: data.anoDeFundacion !== undefined ? data.anoDeFundacion : null,
           redesSociales: data.redesSociales || {},
-          tipo: data.tipo || (data.nombre?.toLowerCase().includes('colegio') ? 'colegio' : data.nombre?.toLowerCase().includes('universidad') ? 'universidad' : 'instituto')
+          tipo: data.tipo || (data.nombre?.toLowerCase().includes('colegio') ? 'colegio' : data.nombre?.toLowerCase().includes('universidad') ? 'universidad' : 'instituto'),
+          isProfessorsBlocked: data.isProfessorsBlocked || false
         });
       });
       setInstitutes(list);
@@ -900,6 +902,13 @@ export default function App() {
       triggerNotice("⚠️ Debes iniciar sesión con Google para registrar un profesor.");
       setIsAddProfessorModalOpen(false);
       setIsJoinModalOpen(true);
+      return;
+    }
+
+    const targetInst = institutes.find(i => i.id === selectedInstituteId);
+    if (targetInst?.isProfessorsBlocked && !isAdminView) {
+      triggerNotice("⚠️ La creación de perfiles de profesores ha sido bloqueada para este centro.");
+      setIsAddProfessorModalOpen(false);
       return;
     }
 
@@ -2001,6 +2010,19 @@ export default function App() {
     }
   };
 
+  const handleToggleBlockProfessors = async (id: string, currentStatus: boolean) => {
+    try {
+      await ensureAnonymousSignIn();
+      await setDoc(doc(db, 'centros.educativos', id), {
+        isProfessorsBlocked: !currentStatus
+      }, { merge: true });
+      triggerNotice(`Estado de bloqueo del centro actualizado exitosamente.`);
+    } catch (err) {
+      console.error("Error toggling professors block:", err);
+      triggerNotice("No se pudo actualizar el estado de bloqueo.");
+    }
+  };
+
   const handleDeleteAlumno = async (id: string) => {
     if (!window.confirm("¿Estás seguro de que deseas eliminar este alumno?")) return;
     try {
@@ -2374,6 +2396,16 @@ export default function App() {
   const topNationalAlumnos = useMemo(() => {
     return [...alumnos].sort((a, b) => b.points - a.points).slice(0, 3);
   }, [alumnos]);
+
+  const filteredAdminInstitutes = useMemo(() => {
+    if (!adminInstituteSearch.trim()) return institutes;
+    const query = adminInstituteSearch.toLowerCase();
+    return institutes.filter(inst => 
+      inst.name.toLowerCase().includes(query) || 
+      inst.shortName.toLowerCase().includes(query) ||
+      (inst.location && inst.location.toLowerCase().includes(query))
+    );
+  }, [adminInstituteSearch, institutes]);
 
   // Find active items
   const currentSelectedInstitute = useMemo(() => {
@@ -3923,13 +3955,20 @@ export default function App() {
                     </div>
 
                     {isGoogleUser && (
-                      <button
-                        onClick={() => setIsAddProfessorModalOpen(true)}
-                        className="bg-yellow-400 text-black hover:bg-yellow-300 font-black text-[11px] px-4 py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all duration-300 font-mono tracking-wider shadow-[0_4px_12px_rgba(250,204,21,0.15)] hover:shadow-[0_4px_18px_rgba(250,204,21,0.25)] hover:-translate-y-0.5 active:translate-y-0 cursor-pointer uppercase shrink-0"
-                      >
-                        <Plus className="w-4 h-4 text-black" />
-                        AGREGAR PROFESOR 👨‍🏫
-                      </button>
+                      currentSelectedInstitute?.isProfessorsBlocked ? (
+                        <div className="bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-2.5 rounded-xl text-xs font-mono font-medium flex items-center gap-2">
+                          <Lock className="w-4 h-4 text-red-400 shrink-0" />
+                          <span>Bloqueado por Administración</span>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setIsAddProfessorModalOpen(true)}
+                          className="bg-yellow-400 text-black hover:bg-yellow-300 font-black text-[11px] px-4 py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all duration-300 font-mono tracking-wider shadow-[0_4px_12px_rgba(250,204,21,0.15)] hover:shadow-[0_4px_18px_rgba(250,204,21,0.25)] hover:-translate-y-0.5 active:translate-y-0 cursor-pointer uppercase shrink-0"
+                        >
+                          <Plus className="w-4 h-4 text-black" />
+                          AGREGAR PROFESOR 👨‍🏫
+                        </button>
+                      )
                     )}
                   </div>
 
@@ -5470,11 +5509,27 @@ export default function App() {
                     </button>
                   </div>
 
-                  {institutes.length === 0 ? (
-                    <p className="text-xs text-zinc-500 font-mono py-8 text-center">No hay instituciones registradas.</p>
+                  {/* Search Bar for Centers */}
+                  <div className="relative">
+                    <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                    <input
+                      type="text"
+                      placeholder="Buscar centro educativo por nombre o ubicación..."
+                      value={adminInstituteSearch}
+                      onChange={(e) => setAdminInstituteSearch(e.target.value)}
+                      className="w-full bg-zinc-950 border border-zinc-900 rounded-xl py-2.5 pl-10 pr-4 text-xs font-mono text-white placeholder-zinc-500 focus:outline-none focus:border-yellow-400/40 transition-all"
+                    />
+                  </div>
+
+                  {filteredAdminInstitutes.length === 0 ? (
+                    <p className="text-xs text-zinc-500 font-mono py-8 text-center">
+                      {adminInstituteSearch.trim() 
+                        ? 'No se encontraron centros educativos con este criterio.' 
+                        : 'No hay instituciones registradas.'}
+                    </p>
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {institutes.map(inst => (
+                      {filteredAdminInstitutes.map(inst => (
                         <div key={inst.id} className="bg-zinc-950 border border-zinc-900 rounded-2xl p-4 flex items-center gap-4">
                           <img 
                             src={inst.image || "https://images.unsplash.com/photo-1541339907198-e08756dedf3f?auto=format&fit=crop&q=80&w=300"} 
@@ -5485,18 +5540,39 @@ export default function App() {
                           <div className="flex-1 min-w-0">
                             <h4 className="text-xs font-bold text-white truncate">{inst.name}</h4>
                             <p className="text-[10px] text-zinc-500 font-mono mt-0.5 truncate">{inst.location}</p>
-                            <div className="flex items-center gap-3 mt-2 text-[10px] font-mono text-yellow-400">
-                              <span>📅 Fundada: {inst.anoDeFundacion || 'N/A'}</span>
-                              <span>🆔 ID: {inst.id}</span>
+                            <div className="flex items-center gap-2.5 mt-2 text-[10px] font-mono text-yellow-400 flex-wrap">
+                              <span>📅 {inst.anoDeFundacion || 'N/A'}</span>
+                              <span>🆔 {inst.id}</span>
+                              {inst.isProfessorsBlocked && (
+                                <span className="bg-red-500/10 text-red-400 border border-red-500/25 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider">
+                                  🚫 Bloqueado
+                                </span>
+                              )}
                             </div>
                           </div>
-                          <button
-                            onClick={() => handleDeleteInstitute(inst.id)}
-                            className="text-red-500 hover:text-red-400 p-2.5 hover:bg-red-500/10 rounded-xl transition-colors cursor-pointer"
-                            title="Eliminar centro"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          
+                          <div className="flex items-center gap-2">
+                            {/* Toggle Lock Professors block */}
+                            <button
+                              onClick={() => handleToggleBlockProfessors(inst.id, !!inst.isProfessorsBlocked)}
+                              className={`p-2.5 rounded-xl transition-all border cursor-pointer flex items-center justify-center ${
+                                inst.isProfessorsBlocked 
+                                  ? 'bg-red-500/15 border-red-500/30 text-red-400 hover:bg-red-500/25' 
+                                  : 'bg-zinc-900 border-zinc-800 text-zinc-500 hover:text-white hover:border-zinc-700'
+                              }`}
+                              title={inst.isProfessorsBlocked ? "Desbloquear creación de profesores" : "Bloquear creación de profesores"}
+                            >
+                              <Lock className="w-4 h-4" />
+                            </button>
+
+                            <button
+                              onClick={() => handleDeleteInstitute(inst.id)}
+                              className="text-red-500 hover:text-red-400 p-2.5 hover:bg-red-500/10 rounded-xl transition-colors cursor-pointer"
+                              title="Eliminar centro"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
