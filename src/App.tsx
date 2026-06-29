@@ -139,7 +139,6 @@ export default function App() {
   const [isAdminView, setIsAdminView] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [adminActiveTab, setAdminActiveTab] = useState<'overview' | 'institutes' | 'alumnos' | 'profesores' | 'comments'>('overview');
-  const [adminInstituteSearch, setAdminInstituteSearch] = useState('');
   const [adminPathId, setAdminPathId] = useState<string | null>(null);
   const [adminLocation, setAdminLocation] = useState<{lat: number; lon: number; accuracy: number | null; error: string | null} | null>(null);
   const [dbStats, setDbStats] = useState<{
@@ -565,6 +564,15 @@ export default function App() {
 
   // Profile Create states
 
+  // Reinado ELO states
+  const [reinadoCandidates, setReinadoCandidates] = useState<any[]>([]);
+  const [currentLeftId, setCurrentLeftId] = useState<string | null>(null);
+  const [currentRightId, setCurrentRightId] = useState<string | null>(null);
+  const [newCandidateName, setNewCandidateName] = useState('');
+  const [newCandidatePhoto, setNewCandidatePhoto] = useState('');
+  const [newCandidateSpecialty, setNewCandidateSpecialty] = useState('');
+  const [isSubmittingCandidate, setIsSubmittingCandidate] = useState(false);
+
   // Notification Banner
   const [bannerNotice, setBannerNotice] = useState<string | null>(null);
 
@@ -621,8 +629,7 @@ export default function App() {
           portadaPhotoUrl: data.portadaPhotoUrl || '',
           anoDeFundacion: data.anoDeFundacion !== undefined ? data.anoDeFundacion : null,
           redesSociales: data.redesSociales || {},
-          tipo: data.tipo || (data.nombre?.toLowerCase().includes('colegio') ? 'colegio' : data.nombre?.toLowerCase().includes('universidad') ? 'universidad' : 'instituto'),
-          isProfessorsBlocked: data.isProfessorsBlocked || false
+          tipo: data.tipo || (data.nombre?.toLowerCase().includes('colegio') ? 'colegio' : data.nombre?.toLowerCase().includes('universidad') ? 'universidad' : 'instituto')
         });
       });
       setInstitutes(list);
@@ -669,12 +676,25 @@ export default function App() {
       console.warn("Could not fetch database stats:", error);
     });
 
+    const unsubscribeReinado = onSnapshot(collection(db, 'reinado_candidates'), (snapshot) => {
+      const list: any[] = [];
+      snapshot.forEach((snapDoc) => {
+        list.push({ id: snapDoc.id, ...snapDoc.data() });
+      });
+      // Sort descending by ELO rating (default to 1000 if not set)
+      list.sort((a, b) => (b.elo ?? 1000) - (a.elo ?? 1000));
+      setReinadoCandidates(list);
+    }, (error) => {
+      console.warn("Could not fetch reinado candidates:", error);
+    });
+
     return () => {
       unsubscribeAlumnos();
       unsubscribeComments();
       unsubscribeInstitutes();
       unsubscribePerfiles();
       unsubscribeStats();
+      unsubscribeReinado();
     };
   }, []);
 
@@ -685,6 +705,34 @@ export default function App() {
       localStorage.removeItem('wikistars_user');
     }
   }, [currentUser]);
+
+  // Synchronize current left and right candidate IDs with available list
+  useEffect(() => {
+    if (reinadoCandidates.length >= 2) {
+      const existsLeft = reinadoCandidates.some(c => c.id === currentLeftId);
+      const existsRight = reinadoCandidates.some(c => c.id === currentRightId);
+      if (!currentLeftId || !currentRightId || !existsLeft || !existsRight || currentLeftId === currentRightId) {
+        const leftIdx = Math.floor(Math.random() * reinadoCandidates.length);
+        let rightIdx = Math.floor(Math.random() * reinadoCandidates.length);
+        while (rightIdx === leftIdx) {
+          rightIdx = Math.floor(Math.random() * reinadoCandidates.length);
+        }
+        setCurrentLeftId(reinadoCandidates[leftIdx].id);
+        setCurrentRightId(reinadoCandidates[rightIdx].id);
+      }
+    } else {
+      setCurrentLeftId(null);
+      setCurrentRightId(null);
+    }
+  }, [reinadoCandidates, currentLeftId, currentRightId]);
+
+  const currentLeftCandidate = useMemo(() => {
+    return reinadoCandidates.find(c => c.id === currentLeftId) || null;
+  }, [reinadoCandidates, currentLeftId]);
+
+  const currentRightCandidate = useMemo(() => {
+    return reinadoCandidates.find(c => c.id === currentRightId) || null;
+  }, [reinadoCandidates, currentRightId]);
 
   // Load professors for active institute in real-time
   useEffect(() => {
@@ -902,13 +950,6 @@ export default function App() {
       triggerNotice("⚠️ Debes iniciar sesión con Google para registrar un profesor.");
       setIsAddProfessorModalOpen(false);
       setIsJoinModalOpen(true);
-      return;
-    }
-
-    const targetInst = institutes.find(i => i.id === selectedInstituteId);
-    if (targetInst?.isProfessorsBlocked && !isAdminView) {
-      triggerNotice("⚠️ La creación de perfiles de profesores ha sido bloqueada para este centro.");
-      setIsAddProfessorModalOpen(false);
       return;
     }
 
@@ -1927,6 +1968,101 @@ export default function App() {
     }
   };
 
+  // Vote in the Reinado ELO Versus
+  const handleVoteCandidate = async (winnerId: string, loserId: string) => {
+    const winner = reinadoCandidates.find(c => c.id === winnerId);
+    const loser = reinadoCandidates.find(c => c.id === loserId);
+    if (!winner || !loser) return;
+
+    const rA = winner.elo ?? 1000;
+    const rB = loser.elo ?? 1000;
+
+    // Expected score
+    const eA = 1 / (1 + Math.pow(10, (rB - rA) / 400));
+    const eB = 1 / (1 + Math.pow(10, (rA - rB) / 400));
+
+    const K = 32;
+    const newRA = Math.round(rA + K * (1 - eA));
+    const newRB = Math.round(rB + K * (0 - eB));
+
+    try {
+      await setDoc(doc(db, 'reinado_candidates', winnerId), {
+        ...winner,
+        elo: newRA,
+        votes: (winner.votes ?? 0) + 1
+      }, { merge: true });
+
+      await setDoc(doc(db, 'reinado_candidates', loserId), {
+        ...loser,
+        elo: newRB
+      }, { merge: true });
+
+      // Choose next random matchup
+      if (reinadoCandidates.length >= 2) {
+        let nextLeft = reinadoCandidates[Math.floor(Math.random() * reinadoCandidates.length)];
+        let nextRight = reinadoCandidates[Math.floor(Math.random() * reinadoCandidates.length)];
+        
+        let attempts = 0;
+        while ((nextLeft.id === nextRight.id || (nextLeft.id === winnerId && nextRight.id === loserId) || (nextLeft.id === loserId && nextRight.id === winnerId)) && attempts < 20) {
+          nextLeft = reinadoCandidates[Math.floor(Math.random() * reinadoCandidates.length)];
+          nextRight = reinadoCandidates[Math.floor(Math.random() * reinadoCandidates.length)];
+          attempts++;
+        }
+        if (nextLeft.id === nextRight.id) {
+          while (nextLeft.id === nextRight.id) {
+            nextRight = reinadoCandidates[Math.floor(Math.random() * reinadoCandidates.length)];
+          }
+        }
+        setCurrentLeftId(nextLeft.id);
+        setCurrentRightId(nextRight.id);
+      }
+      
+      triggerNotice('¡Voto de favoritismo registrado!');
+    } catch (error) {
+      console.error("Error updating ELO ratings:", error);
+    }
+  };
+
+  // Admin registers a new Reinado candidate
+  const handleRegisterCandidate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCandidateName.trim() || !newCandidatePhoto.trim()) return;
+
+    setIsSubmittingCandidate(true);
+    try {
+      const id = 'cand_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
+      const newCand = {
+        name: newCandidateName.trim(),
+        photoUrl: newCandidatePhoto.trim(),
+        specialty: newCandidateSpecialty.trim(),
+        elo: 1000,
+        votes: 0,
+        createdAt: new Date().toISOString()
+      };
+      await setDoc(doc(db, 'reinado_candidates', id), newCand);
+      setNewCandidateName('');
+      setNewCandidatePhoto('');
+      setNewCandidateSpecialty('');
+      triggerNotice('Candidata agregada exitosamente.');
+    } catch (error) {
+      console.error("Error creating candidate:", error);
+      triggerNotice('Error al crear candidata.');
+    } finally {
+      setIsSubmittingCandidate(false);
+    }
+  };
+
+  // Admin deletes a Reinado candidate
+  const handleDeleteCandidate = async (candId: string) => {
+    if (!window.confirm('¿Estás seguro de que quieres eliminar esta candidata?')) return;
+    try {
+      await deleteDoc(doc(db, 'reinado_candidates', candId));
+      triggerNotice('Candidata eliminada correctamente.');
+    } catch (error) {
+      console.error("Error deleting candidate:", error);
+    }
+  };
+
   // Handle Google Sign-In and write to /users in Firestore
   const handleGoogleSignIn = async () => {
     const provider = new GoogleAuthProvider();
@@ -2007,19 +2143,6 @@ export default function App() {
     } catch (err) {
       console.error("Error deleting center:", err);
       triggerNotice("No se pudo eliminar el centro.");
-    }
-  };
-
-  const handleToggleBlockProfessors = async (id: string, currentStatus: boolean) => {
-    try {
-      await ensureAnonymousSignIn();
-      await setDoc(doc(db, 'centros.educativos', id), {
-        isProfessorsBlocked: !currentStatus
-      }, { merge: true });
-      triggerNotice(`Estado de bloqueo del centro actualizado exitosamente.`);
-    } catch (err) {
-      console.error("Error toggling professors block:", err);
-      triggerNotice("No se pudo actualizar el estado de bloqueo.");
     }
   };
 
@@ -2396,16 +2519,6 @@ export default function App() {
   const topNationalAlumnos = useMemo(() => {
     return [...alumnos].sort((a, b) => b.points - a.points).slice(0, 3);
   }, [alumnos]);
-
-  const filteredAdminInstitutes = useMemo(() => {
-    if (!adminInstituteSearch.trim()) return institutes;
-    const query = adminInstituteSearch.toLowerCase();
-    return institutes.filter(inst => 
-      inst.name.toLowerCase().includes(query) || 
-      inst.shortName.toLowerCase().includes(query) ||
-      (inst.location && inst.location.toLowerCase().includes(query))
-    );
-  }, [adminInstituteSearch, institutes]);
 
   // Find active items
   const currentSelectedInstitute = useMemo(() => {
@@ -3955,20 +4068,13 @@ export default function App() {
                     </div>
 
                     {isGoogleUser && (
-                      currentSelectedInstitute?.isProfessorsBlocked ? (
-                        <div className="bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-2.5 rounded-xl text-xs font-mono font-medium flex items-center gap-2">
-                          <Lock className="w-4 h-4 text-red-400 shrink-0" />
-                          <span>Bloqueado por Administración</span>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => setIsAddProfessorModalOpen(true)}
-                          className="bg-yellow-400 text-black hover:bg-yellow-300 font-black text-[11px] px-4 py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all duration-300 font-mono tracking-wider shadow-[0_4px_12px_rgba(250,204,21,0.15)] hover:shadow-[0_4px_18px_rgba(250,204,21,0.25)] hover:-translate-y-0.5 active:translate-y-0 cursor-pointer uppercase shrink-0"
-                        >
-                          <Plus className="w-4 h-4 text-black" />
-                          AGREGAR PROFESOR 👨‍🏫
-                        </button>
-                      )
+                      <button
+                        onClick={() => setIsAddProfessorModalOpen(true)}
+                        className="bg-yellow-400 text-black hover:bg-yellow-300 font-black text-[11px] px-4 py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all duration-300 font-mono tracking-wider shadow-[0_4px_12px_rgba(250,204,21,0.15)] hover:shadow-[0_4px_18px_rgba(250,204,21,0.25)] hover:-translate-y-0.5 active:translate-y-0 cursor-pointer uppercase shrink-0"
+                      >
+                        <Plus className="w-4 h-4 text-black" />
+                        AGREGAR PROFESOR 👨‍🏫
+                      </button>
                     )}
                   </div>
 
@@ -4098,6 +4204,253 @@ export default function App() {
                         ))}
                       </div>
                     </div>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* TAB 7: REINADO VERSUS ELO SYSTEM */}
+              {activeCampusTab === 'Reinado' && (
+                <motion.div
+                  key="tab-reinado-panel"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  className="space-y-8"
+                >
+                  {/* Hero Title Header */}
+                  <div className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl p-6 sm:p-8 text-center space-y-3 relative overflow-hidden shadow-2xl">
+                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-1 bg-gradient-to-r from-transparent via-yellow-400 to-transparent" />
+                    <div className="inline-flex items-center justify-center p-3 rounded-full bg-yellow-400/10 border border-yellow-400/20 mb-1">
+                      <Crown className="w-8 h-8 text-yellow-400 animate-bounce" />
+                    </div>
+                    <h3 className="font-display font-black text-xl sm:text-2xl text-white uppercase tracking-widest">
+                      VERSUS REINADO: SISTEMA ELO
+                    </h3>
+                    <p className="text-xs text-zinc-400 max-w-lg mx-auto leading-relaxed">
+                      Elige a tu favorita en cada emparejamiento aleatorio para actualizar su puntaje ELO global en tiempo real. ¡La tabla de posiciones se actualiza de manera interactiva!
+                    </p>
+                  </div>
+
+                  {/* ELO Matchup Versus Arena */}
+                  <div className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl p-6 sm:p-8 space-y-6">
+                    <div className="text-center space-y-1">
+                      <span className="text-[10px] font-mono uppercase tracking-widest text-yellow-400 font-black">ENFRENTAMIENTO DIRECTO</span>
+                      <h4 className="text-lg sm:text-xl font-display font-black text-white uppercase tracking-wide">
+                        ¿Quién es tu favorita?
+                      </h4>
+                    </div>
+
+                    {reinadoCandidates.length < 2 ? (
+                      <div className="bg-[#0e0e10]/60 border border-zinc-900 rounded-xl p-8 text-center space-y-4 max-w-md mx-auto">
+                        <p className="text-xs text-zinc-400 leading-relaxed font-sans">
+                          Aún no hay suficientes candidatas registradas. El administrador debe agregar al menos 2 candidatas para poder iniciar la votación del Versus ELO.
+                        </p>
+                        {isAdmin && (
+                          <button
+                            onClick={() => setIsAdminView(true)}
+                            className="bg-yellow-400 hover:bg-yellow-350 text-black font-mono font-black text-xs px-4 py-2 rounded-lg uppercase tracking-wider transition-all cursor-pointer"
+                          >
+                            Ir a Registrar Chicas 👑
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-7 gap-6 items-center max-w-3xl mx-auto pt-2">
+                        {/* Left Candidate Card */}
+                        {currentLeftCandidate && (
+                          <motion.div
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                            className="md:col-span-3 bg-[#050506] border border-zinc-900 rounded-2xl overflow-hidden cursor-pointer hover:border-yellow-400/30 transition-all duration-300 shadow-xl flex flex-col group"
+                            onClick={() => handleVoteCandidate(currentLeftCandidate.id, currentRightCandidate?.id ?? '')}
+                          >
+                            <div className="aspect-[4/5] relative bg-zinc-950 overflow-hidden">
+                              <img
+                                src={currentLeftCandidate.photoUrl}
+                                alt={currentLeftCandidate.name}
+                                referrerPolicy="no-referrer"
+                                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=300';
+                                }}
+                              />
+                              <div className="absolute inset-0 bg-gradient-to-t from-black via-black/10 to-transparent opacity-60" />
+                              <div className="absolute bottom-4 left-4 right-4 text-left">
+                                <span className="text-[10px] font-mono font-black bg-yellow-400 text-black px-2 py-0.5 rounded uppercase tracking-wider">
+                                  Opción A
+                                </span>
+                              </div>
+                            </div>
+                            <div className="p-4 text-center space-y-1">
+                              <h5 className="font-sans font-bold text-sm text-white uppercase group-hover:text-yellow-400 transition-colors">
+                                {currentLeftCandidate.name}
+                              </h5>
+                              {currentLeftCandidate.specialty && (
+                                <p className="text-[10px] text-yellow-400 font-sans font-semibold uppercase tracking-wider">
+                                  {currentLeftCandidate.specialty}
+                                </p>
+                              )}
+                              <p className="text-[11px] font-mono text-zinc-500">
+                                ELO: <span className="text-yellow-400 font-bold">{currentLeftCandidate.elo ?? 1000}</span>
+                              </p>
+                              <div className="pt-2">
+                                <span className="inline-block w-full bg-zinc-900 hover:bg-yellow-400/10 border border-zinc-800 hover:border-yellow-400/30 text-white group-hover:bg-yellow-400 group-hover:text-black font-mono text-[10px] font-black py-2 rounded-lg uppercase tracking-wider transition-all duration-300">
+                                  Votar por Ella 👑
+                                </span>
+                              </div>
+                            </div>
+                          </motion.div>
+                        )}
+
+                        {/* VS Divider */}
+                        <div className="md:col-span-1 flex flex-col items-center justify-center">
+                          <div className="w-12 h-12 rounded-full bg-yellow-400 text-black font-mono font-black text-sm flex items-center justify-center shadow-[0_0_20px_rgba(250,204,21,0.3)] border-2 border-black animate-pulse z-10">
+                            VS
+                          </div>
+                          <div className="hidden md:block w-0.5 h-20 bg-gradient-to-b from-transparent via-zinc-800 to-transparent -mt-2" />
+                        </div>
+
+                        {/* Right Candidate Card */}
+                        {currentRightCandidate && (
+                          <motion.div
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                            className="md:col-span-3 bg-[#050506] border border-zinc-900 rounded-2xl overflow-hidden cursor-pointer hover:border-yellow-400/30 transition-all duration-300 shadow-xl flex flex-col group"
+                            onClick={() => handleVoteCandidate(currentRightCandidate.id, currentLeftCandidate?.id ?? '')}
+                          >
+                            <div className="aspect-[4/5] relative bg-zinc-950 overflow-hidden">
+                              <img
+                                src={currentRightCandidate.photoUrl}
+                                alt={currentRightCandidate.name}
+                                referrerPolicy="no-referrer"
+                                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=300';
+                                }}
+                              />
+                              <div className="absolute inset-0 bg-gradient-to-t from-black via-black/10 to-transparent opacity-60" />
+                              <div className="absolute bottom-4 left-4 right-4 text-left">
+                                <span className="text-[10px] font-mono font-black bg-blue-400 text-black px-2 py-0.5 rounded uppercase tracking-wider">
+                                  Opción B
+                                </span>
+                              </div>
+                            </div>
+                            <div className="p-4 text-center space-y-1">
+                              <h5 className="font-sans font-bold text-sm text-white uppercase group-hover:text-yellow-400 transition-colors">
+                                {currentRightCandidate.name}
+                              </h5>
+                              {currentRightCandidate.specialty && (
+                                <p className="text-[10px] text-yellow-400 font-sans font-semibold uppercase tracking-wider">
+                                  {currentRightCandidate.specialty}
+                                </p>
+                              )}
+                              <p className="text-[11px] font-mono text-zinc-500">
+                                ELO: <span className="text-yellow-400 font-bold">{currentRightCandidate.elo ?? 1000}</span>
+                              </p>
+                              <div className="pt-2">
+                                <span className="inline-block w-full bg-zinc-900 hover:bg-yellow-400/10 border border-zinc-800 hover:border-yellow-400/30 text-white group-hover:bg-yellow-400 group-hover:text-black font-mono text-[10px] font-black py-2 rounded-lg uppercase tracking-wider transition-all duration-300">
+                                  Votar por Ella 👑
+                                </span>
+                              </div>
+                            </div>
+                          </motion.div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ELO Leaderboard list */}
+                  <div className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl p-6 sm:p-8 space-y-5">
+                    <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
+                      <div className="flex items-center gap-2">
+                        <Trophy className="w-4 h-4 text-yellow-400" />
+                        <h4 className="font-mono text-xs font-black text-zinc-300 uppercase tracking-widest">
+                          Tabla de Posiciones ELO (Ordenadas de Mayor a Menor)
+                        </h4>
+                      </div>
+                      <span className="text-[9px] font-mono text-zinc-500 uppercase bg-[#040405] px-2 py-1 rounded border border-zinc-900">
+                        Puntaje inicial: 1000 pts
+                      </span>
+                    </div>
+
+                    {reinadoCandidates.length === 0 ? (
+                      <div className="bg-[#040405] border border-zinc-900 rounded-xl p-8 text-center text-zinc-500 font-sans text-xs">
+                        No hay candidatas registradas todavía en el reinado.
+                      </div>
+                    ) : (
+                      <div className="space-y-2.5 max-w-2xl mx-auto">
+                        {reinadoCandidates.map((cand, index) => {
+                          const isFirst = index === 0;
+                          const isSecond = index === 1;
+                          const isThird = index === 2;
+
+                          return (
+                            <div
+                              key={cand.id}
+                              className={`flex items-center justify-between gap-4 p-3.5 rounded-xl border transition-all ${
+                                isFirst
+                                  ? 'bg-gradient-to-r from-yellow-400/5 via-[#0b0b0c] to-[#0b0b0c] border-yellow-400/30 shadow-[0_4px_20px_rgba(250,204,21,0.05)]'
+                                  : 'bg-[#040405] border-zinc-900 hover:border-zinc-800'
+                              }`}
+                            >
+                              <div className="flex items-center gap-3.5 min-w-0">
+                                {/* Position badge */}
+                                <div className="flex items-center justify-center w-8 shrink-0">
+                                  {isFirst ? (
+                                    <div className="flex flex-col items-center">
+                                      <Crown className="w-4 h-4 text-yellow-400 animate-pulse mb-0.5" />
+                                      <span className="text-xs font-mono font-black text-yellow-400">#1</span>
+                                    </div>
+                                  ) : isSecond ? (
+                                    <span className="text-xs font-mono font-black text-zinc-350">#2</span>
+                                  ) : isThird ? (
+                                    <span className="text-xs font-mono font-black text-amber-600">#3</span>
+                                  ) : (
+                                    <span className="text-xs font-mono font-medium text-zinc-500">#{index + 1}</span>
+                                  )}
+                                </div>
+
+                                {/* Avatar photo */}
+                                <img
+                                  src={cand.photoUrl}
+                                  alt={cand.name}
+                                  referrerPolicy="no-referrer"
+                                  className={`w-11 h-11 rounded-lg object-cover bg-zinc-950 shrink-0 ${
+                                    isFirst ? 'ring-2 ring-yellow-400/40' : 'border border-zinc-800'
+                                  }`}
+                                  onError={(e) => {
+                                    (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100';
+                                  }}
+                                />
+
+                                <div className="min-w-0">
+                                  <span className={`block text-xs font-bold uppercase truncate ${isFirst ? 'text-yellow-400 font-extrabold' : 'text-zinc-200'}`}>
+                                    {cand.name}
+                                  </span>
+                                  {cand.specialty && (
+                                    <span className="block text-[10px] text-yellow-400/90 font-sans font-semibold uppercase tracking-wider leading-none my-0.5">
+                                      {cand.specialty}
+                                    </span>
+                                  )}
+                                  <span className="block text-[10px] text-zinc-550 font-mono">
+                                    Enfrentamientos: {(cand.votes ?? 0)} votos a favor
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="text-right shrink-0">
+                                <span className={`block font-mono text-sm font-black ${isFirst ? 'text-yellow-400 text-base' : 'text-white'}`}>
+                                  {cand.elo ?? 1000}
+                                </span>
+                                <span className="block text-[9px] text-zinc-500 font-mono uppercase tracking-wider">
+                                  Puntos ELO
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </motion.div>
               )}
@@ -5089,7 +5442,7 @@ export default function App() {
                   Panel de Administración
                 </h1>
                 <p className="text-xs text-zinc-500 font-mono mt-1">
-                  Herramientas globales de moderación, control de centros, alumnos y docentes.
+                  Espacio de moderación y herramientas globales en desarrollo.
                 </p>
               </div>
               
@@ -5101,663 +5454,243 @@ export default function App() {
               </button>
             </div>
 
-            {/* Bento Grid Analytics */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div 
-                onClick={() => setAdminActiveTab('institutes')}
-                className={`p-5 rounded-2xl border bg-zinc-950 cursor-pointer transition-all ${adminActiveTab === 'institutes' ? 'border-yellow-400/50 shadow-[0_0_15px_rgba(250,204,21,0.05)]' : 'border-zinc-900 hover:border-zinc-800'}`}
-              >
-                <div className="flex items-center justify-between mb-3 text-zinc-500">
-                  <Building className="w-5 h-5" />
-                  <span className="text-[10px] font-mono font-bold uppercase">Centros</span>
-                </div>
-                <p className="text-2xl font-black font-mono text-white">{institutes.length}</p>
-                <p className="text-[10px] text-zinc-500 font-mono mt-1">Sedes registradas</p>
+            {/* Statistics Dashboard Section */}
+            <div className="space-y-6">
+              <div className="flex items-center gap-2 pb-2 border-b border-zinc-900">
+                <Shield className="w-4 h-4 text-yellow-400" />
+                <h2 className="text-xs font-mono font-bold uppercase tracking-widest text-zinc-400">
+                  Estadísticas Globales de la Base de Datos
+                </h2>
               </div>
 
-              <div 
-                onClick={() => setAdminActiveTab('alumnos')}
-                className={`p-5 rounded-2xl border bg-zinc-950 cursor-pointer transition-all ${adminActiveTab === 'alumnos' ? 'border-yellow-400/50 shadow-[0_0_15px_rgba(250,204,21,0.05)]' : 'border-zinc-900 hover:border-zinc-800'}`}
-              >
-                <div className="flex items-center justify-between mb-3 text-zinc-500">
-                  <Users className="w-5 h-5" />
-                  <span className="text-[10px] font-mono font-bold uppercase">Alumnos</span>
+              {/* Bento Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {/* Centros Creados */}
+                <div className="bg-[#09090b] border border-zinc-900 p-5 rounded-2xl hover:border-zinc-800 transition-all duration-300 shadow-[0_4px_20px_rgba(0,0,0,0.4)]">
+                  <div className="flex items-center justify-between text-zinc-500 mb-3">
+                    <Building className="w-5 h-5 text-yellow-400" />
+                    <span className="text-[9px] font-mono font-bold uppercase tracking-wider bg-zinc-950 px-2 py-0.5 rounded border border-zinc-900">Total</span>
+                  </div>
+                  <div className="text-2xl font-black font-mono text-white">
+                    {dbStats !== null ? dbStats.centros_creados : '...'}
+                  </div>
+                  <h3 className="text-xs font-sans font-medium text-zinc-300 mt-1">Centros Creados</h3>
+                  <p className="text-[10px] text-zinc-500 font-mono mt-1">Sedes registradas en la app</p>
                 </div>
-                <p className="text-2xl font-black font-mono text-white">{alumnos.length}</p>
-                <p className="text-[10px] text-zinc-500 font-mono mt-1">Pasaportes emitidos</p>
-              </div>
 
-              <div 
-                onClick={() => setAdminActiveTab('profesores')}
-                className={`p-5 rounded-2xl border bg-zinc-950 cursor-pointer transition-all ${adminActiveTab === 'profesores' ? 'border-yellow-400/50 shadow-[0_0_15px_rgba(250,204,21,0.05)]' : 'border-zinc-900 hover:border-zinc-800'}`}
-              >
-                <div className="flex items-center justify-between mb-3 text-zinc-500">
-                  <Award className="w-5 h-5" />
-                  <span className="text-[10px] font-mono font-bold uppercase">Docentes</span>
+                {/* Institutos */}
+                <div className="bg-[#09090b] border border-zinc-900 p-5 rounded-2xl hover:border-zinc-800 transition-all duration-300 shadow-[0_4px_20px_rgba(0,0,0,0.4)]">
+                  <div className="flex items-center justify-between text-zinc-500 mb-3">
+                    <Landmark className="w-5 h-5 text-blue-400" />
+                    <span className="text-[9px] font-mono font-bold uppercase tracking-wider bg-zinc-950 px-2 py-0.5 rounded border border-zinc-900">Categoría</span>
+                  </div>
+                  <div className="text-2xl font-black font-mono text-white">
+                    {dbStats !== null ? dbStats.institutos : '...'}
+                  </div>
+                  <h3 className="text-xs font-sans font-medium text-zinc-300 mt-1">Institutos</h3>
+                  <p className="text-[10px] text-zinc-500 font-mono mt-1">Sedes de educación técnica</p>
                 </div>
-                <p className="text-2xl font-black font-mono text-white">{perfiles.length}</p>
-                <p className="text-[10px] text-zinc-500 font-mono mt-1">Profesores calificados</p>
-              </div>
 
-              <div 
-                onClick={() => setAdminActiveTab('comments')}
-                className={`p-5 rounded-2xl border bg-zinc-950 cursor-pointer transition-all ${adminActiveTab === 'comments' ? 'border-yellow-400/50 shadow-[0_0_15px_rgba(250,204,21,0.05)]' : 'border-zinc-900 hover:border-zinc-800'}`}
-              >
-                <div className="flex items-center justify-between mb-3 text-zinc-500">
-                  <MessageSquare className="w-5 h-5" />
-                  <span className="text-[10px] font-mono font-bold uppercase">Murmullos</span>
+                {/* Colegios */}
+                <div className="bg-[#09090b] border border-zinc-900 p-5 rounded-2xl hover:border-zinc-800 transition-all duration-300 shadow-[0_4px_20px_rgba(0,0,0,0.4)]">
+                  <div className="flex items-center justify-between text-zinc-500 mb-3">
+                    <School className="w-5 h-5 text-purple-400" />
+                    <span className="text-[9px] font-mono font-bold uppercase tracking-wider bg-zinc-950 px-2 py-0.5 rounded border border-zinc-900">Categoría</span>
+                  </div>
+                  <div className="text-2xl font-black font-mono text-white">
+                    {dbStats !== null ? dbStats.colegios : '...'}
+                  </div>
+                  <h3 className="text-xs font-sans font-medium text-zinc-300 mt-1">Colegios</h3>
+                  <p className="text-[10px] text-zinc-500 font-mono mt-1">Instituciones de educación básica</p>
                 </div>
-                <p className="text-2xl font-black font-mono text-white">{comments.length}</p>
-                <p className="text-[10px] text-zinc-500 font-mono mt-1">Mensajes publicados</p>
+
+                {/* Universidades */}
+                <div className="bg-[#09090b] border border-zinc-900 p-5 rounded-2xl hover:border-zinc-800 transition-all duration-300 shadow-[0_4px_20px_rgba(0,0,0,0.4)]">
+                  <div className="flex items-center justify-between text-zinc-500 mb-3">
+                    <GraduationCap className="w-5 h-5 text-green-400" />
+                    <span className="text-[9px] font-mono font-bold uppercase tracking-wider bg-zinc-950 px-2 py-0.5 rounded border border-zinc-900">Categoría</span>
+                  </div>
+                  <div className="text-2xl font-black font-mono text-white">
+                    {dbStats !== null ? dbStats.universidades : '...'}
+                  </div>
+                  <h3 className="text-xs font-sans font-medium text-zinc-300 mt-1">Universidades</h3>
+                  <p className="text-[10px] text-zinc-500 font-mono mt-1">Sedes de educación superior</p>
+                </div>
+
+                {/* Usuarios Anónimos */}
+                <div className="bg-[#09090b] border border-zinc-900 p-5 rounded-2xl hover:border-zinc-800 transition-all duration-300 shadow-[0_4px_20px_rgba(0,0,0,0.4)]">
+                  <div className="flex items-center justify-between text-zinc-500 mb-3">
+                    <Users className="w-5 h-5 text-zinc-400" />
+                    <span className="text-[9px] font-mono font-bold uppercase tracking-wider bg-zinc-950 px-2 py-0.5 rounded border border-zinc-900">Acceso</span>
+                  </div>
+                  <div className="text-2xl font-black font-mono text-white">
+                    {dbStats !== null ? dbStats.usuarios_anonimos : '...'}
+                  </div>
+                  <h3 className="text-xs font-sans font-medium text-zinc-300 mt-1">Usuarios Anónimos</h3>
+                  <p className="text-[10px] text-zinc-500 font-mono mt-1">Cuentas creadas sin registrarse</p>
+                </div>
+
+                {/* Usuarios Registrados con Google */}
+                <div className="bg-[#09090b] border border-zinc-900 p-5 rounded-2xl hover:border-zinc-800 transition-all duration-300 shadow-[0_4px_20px_rgba(0,0,0,0.4)]">
+                  <div className="flex items-center justify-between text-zinc-500 mb-3">
+                    <Sparkles className="w-5 h-5 text-yellow-400 animate-pulse" />
+                    <span className="text-[9px] font-mono font-bold uppercase tracking-wider bg-zinc-950 px-2 py-0.5 rounded border border-zinc-900">Google</span>
+                  </div>
+                  <div className="text-2xl font-black font-mono text-white">
+                    {dbStats !== null ? dbStats.usuarios_google : '...'}
+                  </div>
+                  <h3 className="text-xs font-sans font-medium text-zinc-300 mt-1">Usuarios Google (Total)</h3>
+                  <p className="text-[10px] text-zinc-500 font-mono mt-1">Usuarios con identidad vinculada</p>
+                </div>
+
+                {/* Registro Directo con Google */}
+                <div className="bg-[#09090b] border border-zinc-900 p-5 rounded-2xl hover:border-zinc-800 transition-all duration-300 shadow-[0_4px_20px_rgba(0,0,0,0.4)]">
+                  <div className="flex items-center justify-between text-zinc-500 mb-3">
+                    <Compass className="w-5 h-5 text-orange-400" />
+                    <span className="text-[9px] font-mono font-bold uppercase tracking-wider bg-zinc-950 px-2 py-0.5 rounded border border-zinc-900">Directo</span>
+                  </div>
+                  <div className="text-2xl font-black font-mono text-white">
+                    {dbStats !== null ? dbStats.usuarios_google_directo : '...'}
+                  </div>
+                  <h3 className="text-xs font-sans font-medium text-zinc-300 mt-1">Google Directo</h3>
+                  <p className="text-[10px] text-zinc-500 font-mono mt-1">Cuentas creadas con Google</p>
+                </div>
+
+                {/* Usuarios Convertidos */}
+                <div className="bg-[#09090b] border border-zinc-900 p-5 rounded-2xl hover:border-zinc-800 transition-all duration-300 shadow-[0_4px_20px_rgba(0,0,0,0.4)]">
+                  <div className="flex items-center justify-between text-zinc-500 mb-3">
+                    <Flame className="w-5 h-5 text-red-500" />
+                    <span className="text-[9px] font-mono font-bold uppercase tracking-wider bg-zinc-950 px-2 py-0.5 rounded border border-zinc-900">Conversión</span>
+                  </div>
+                  <div className="text-2xl font-black font-mono text-white">
+                    {dbStats !== null ? dbStats.usuarios_convertidos_google : '...'}
+                  </div>
+                  <h3 className="text-xs font-sans font-medium text-zinc-300 mt-1">Usuarios Convertidos</h3>
+                  <p className="text-[10px] text-zinc-500 font-mono mt-1">Anónimos migrados a Google</p>
+                </div>
               </div>
             </div>
 
-            {/* Navigation Tabs */}
-            <div className="flex items-center gap-1.5 border-b border-zinc-900 pb-px overflow-x-auto">
-              <button
-                onClick={() => setAdminActiveTab('overview')}
-                className={`px-4 py-3 text-xs font-mono font-bold uppercase tracking-wider border-b-2 cursor-pointer transition-all shrink-0 ${
-                  adminActiveTab === 'overview' 
-                    ? 'border-yellow-400 text-yellow-400' 
-                    : 'border-transparent text-zinc-500 hover:text-zinc-300'
-                }`}
-              >
-                Resumen
-              </button>
-              <button
-                onClick={() => setAdminActiveTab('institutes')}
-                className={`px-4 py-3 text-xs font-mono font-bold uppercase tracking-wider border-b-2 cursor-pointer transition-all shrink-0 ${
-                  adminActiveTab === 'institutes' 
-                    ? 'border-yellow-400 text-yellow-400' 
-                    : 'border-transparent text-zinc-500 hover:text-zinc-300'
-                }`}
-              >
-                Centros ({institutes.length})
-              </button>
-              <button
-                onClick={() => setAdminActiveTab('alumnos')}
-                className={`px-4 py-3 text-xs font-mono font-bold uppercase tracking-wider border-b-2 cursor-pointer transition-all shrink-0 ${
-                  adminActiveTab === 'alumnos' 
-                    ? 'border-yellow-400 text-yellow-400' 
-                    : 'border-transparent text-zinc-500 hover:text-zinc-300'
-                }`}
-              >
-                Alumnos ({alumnos.length})
-              </button>
-              <button
-                onClick={() => setAdminActiveTab('profesores')}
-                className={`px-4 py-3 text-xs font-mono font-bold uppercase tracking-wider border-b-2 cursor-pointer transition-all shrink-0 ${
-                  adminActiveTab === 'profesores' 
-                    ? 'border-yellow-400 text-yellow-400' 
-                    : 'border-transparent text-zinc-500 hover:text-zinc-300'
-                }`}
-              >
-                Docentes ({perfiles.length})
-              </button>
-              <button
-                onClick={() => setAdminActiveTab('comments')}
-                className={`px-4 py-3 text-xs font-mono font-bold uppercase tracking-wider border-b-2 cursor-pointer transition-all shrink-0 ${
-                  adminActiveTab === 'comments' 
-                    ? 'border-yellow-400 text-yellow-400' 
-                    : 'border-transparent text-zinc-500 hover:text-zinc-300'
-                }`}
-              >
-                Murmullos ({comments.length})
-              </button>
-            </div>
+            {/* Reinado ELO Management Section */}
+            <div className="bg-[#09090b] border border-zinc-900 rounded-2xl p-6 space-y-6 mt-8">
+              <div className="flex items-center gap-2 pb-2 border-b border-zinc-900">
+                <Crown className="w-4 h-4 text-yellow-400" />
+                <h2 className="text-xs font-mono font-bold uppercase tracking-widest text-zinc-400">
+                  Gestión del Reinado - Versus ELO
+                </h2>
+              </div>
 
-            {/* Tab content area */}
-            <div className="bg-[#09090b] border border-zinc-900 rounded-3xl p-6 sm:p-8">
-              
-              {/* TAB 1: OVERVIEW */}
-              {adminActiveTab === 'overview' && (
-                <div className="space-y-6">
-                  <div className="flex items-center gap-2 pb-4 border-b border-zinc-900 mb-2">
-                    <Shield className="w-5 h-5 text-yellow-400" />
-                    <h3 className="font-display font-bold text-lg text-white">Consola de Estado</h3>
-                  </div>
-                  
-                  <div className="bg-zinc-950 border border-zinc-900 p-5 rounded-2xl space-y-4">
-                    <p className="text-xs text-zinc-400 font-mono leading-relaxed">
-                      ¡Bienvenido al Panel de Control! Aquí puedes auditar y moderar el contenido del campus educativo de Starryz5 de manera directo e irrevocable. Todas las operaciones realizadas en esta consola impactarán instantáneamente la base de datos de producción de Firebase.
-                    </p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-mono">
-                      <div className="flex items-center gap-2 text-zinc-500">
-                        <span className="w-2 h-2 rounded-full bg-green-500" />
-                        <span>Base de Datos: Firebase Firestore (Activa)</span>
-                      </div>
-                      <div className="flex items-center gap-2 text-zinc-500">
-                        <span className="w-2 h-2 rounded-full bg-green-500" />
-                        <span>Autenticación: Firebase Auth (Anonymous/Google)</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* DATABASE GLOBAL STATISTICS PANEL */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {/* Centros Educativos Card */}
-                    <div className="bg-zinc-950 border border-zinc-900 rounded-2xl p-6 space-y-4">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Building className="w-5 h-5 text-yellow-400" />
-                          <h4 className="text-sm font-display font-bold text-white">Centros Educativos Registrados</h4>
-                        </div>
-                        <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800">Firestore DB</span>
-                      </div>
-
-                      <div className="flex items-baseline gap-2">
-                        <span className="text-4xl font-mono font-bold text-white">
-                          {dbStats?.centros_creados !== undefined ? dbStats.centros_creados : '...'}
-                        </span>
-                        <span className="text-xs text-zinc-500 font-mono">centros en total</span>
-                      </div>
-
-                      <div className="space-y-3 pt-2">
-                        {/* Instituto progress bar */}
-                        <div>
-                          <div className="flex justify-between text-xs font-mono mb-1">
-                            <span className="text-zinc-400 flex items-center gap-1.5">
-                              <Landmark className="w-3.5 h-3.5 text-zinc-500" />
-                              Institutos
-                            </span>
-                            <span className="text-zinc-300 font-bold">{dbStats?.institutos || 0}</span>
-                          </div>
-                          <div className="h-1.5 w-full bg-zinc-900 rounded-full overflow-hidden">
-                            <div 
-                              className="h-full bg-yellow-400 rounded-full transition-all duration-500" 
-                              style={{ width: `${dbStats?.centros_creados ? Math.min(100, ((dbStats.institutos || 0) / dbStats.centros_creados) * 100) : 0}%` }}
-                            />
-                          </div>
-                        </div>
-
-                        {/* Universidad progress bar */}
-                        <div>
-                          <div className="flex justify-between text-xs font-mono mb-1">
-                            <span className="text-zinc-400 flex items-center gap-1.5">
-                              <GraduationCap className="w-3.5 h-3.5 text-zinc-500" />
-                              Universidades
-                            </span>
-                            <span className="text-zinc-300 font-bold">{dbStats?.universidades || 0}</span>
-                          </div>
-                          <div className="h-1.5 w-full bg-zinc-900 rounded-full overflow-hidden">
-                            <div 
-                              className="h-full bg-blue-500 rounded-full transition-all duration-500" 
-                              style={{ width: `${dbStats?.centros_creados ? Math.min(100, ((dbStats.universidades || 0) / dbStats.centros_creados) * 100) : 0}%` }}
-                            />
-                          </div>
-                        </div>
-
-                        {/* Colegio progress bar */}
-                        <div>
-                          <div className="flex justify-between text-xs font-mono mb-1">
-                            <span className="text-zinc-400 flex items-center gap-1.5">
-                              <School className="w-3.5 h-3.5 text-zinc-500" />
-                              Colegios
-                            </span>
-                            <span className="text-zinc-300 font-bold">{dbStats?.colegios || 0}</span>
-                          </div>
-                          <div className="h-1.5 w-full bg-zinc-900 rounded-full overflow-hidden">
-                            <div 
-                              className="h-full bg-purple-500 rounded-full transition-all duration-500" 
-                              style={{ width: `${dbStats?.centros_creados ? Math.min(100, ((dbStats.colegios || 0) / dbStats.centros_creados) * 100) : 0}%` }}
-                            />
-                          </div>
-                        </div>
-                      </div>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Form to add candidate */}
+                <div className="bg-[#040405] border border-zinc-900 p-5 rounded-xl space-y-4">
+                  <h3 className="text-xs font-mono font-black text-zinc-300 uppercase tracking-wider">
+                    Agregar Nueva Candidata
+                  </h3>
+                  <form onSubmit={handleRegisterCandidate} className="space-y-3.5">
+                    <div>
+                      <label className="block text-[10px] font-mono text-zinc-500 uppercase mb-1">Nombre Completo</label>
+                      <input
+                        type="text"
+                        required
+                        value={newCandidateName}
+                        onChange={(e) => setNewCandidateName(e.target.value)}
+                        placeholder="Ej. Maria Belen"
+                        className="w-full bg-zinc-950 border border-zinc-900 focus:border-zinc-850 rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-750 outline-none transition-all font-sans"
+                      />
                     </div>
 
-                    {/* Usuarios Card */}
-                    <div className="bg-zinc-950 border border-zinc-900 rounded-2xl p-6 space-y-4">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Users className="w-5 h-5 text-yellow-400" />
-                          <h4 className="text-sm font-display font-bold text-white">Usuarios de la Plataforma</h4>
-                        </div>
-                        <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800">Firebase Auth</span>
-                      </div>
-
-                      <div className="flex items-baseline gap-2">
-                        <span className="text-4xl font-mono font-bold text-white">
-                          {dbStats ? (dbStats.usuarios_anonimos + dbStats.usuarios_google) : '...'}
-                        </span>
-                        <span className="text-xs text-zinc-500 font-mono">cuentas en total</span>
-                      </div>
-
-                      <div className="space-y-3 pt-2">
-                        {/* Google Direct Auth user count */}
-                        <div className="flex items-center justify-between p-3 bg-[#0d0d0f] border border-zinc-900 rounded-xl">
-                          <div className="flex items-center gap-2">
-                            <div className="w-2.5 h-2.5 rounded-full bg-green-500" />
-                            <div className="text-xs font-mono">
-                              <div className="text-white font-bold">Google (Registro Directo)</div>
-                              <div className="text-[10px] text-zinc-500">Ingresos directos con Google</div>
-                            </div>
-                          </div>
-                          <span className="text-lg font-mono font-bold text-white">{dbStats?.usuarios_google_directo || 0}</span>
-                        </div>
-
-                        {/* Google Converted Auth user count */}
-                        <div className="flex items-center justify-between p-3 bg-[#0d0d0f] border border-zinc-900 rounded-xl">
-                          <div className="flex items-center gap-2">
-                            <div className="w-2.5 h-2.5 rounded-full bg-yellow-400" />
-                            <div className="text-xs font-mono">
-                              <div className="text-white font-bold">Google (Convertidos)</div>
-                              <div className="text-[10px] text-zinc-500">Anónimos que se registraron</div>
-                            </div>
-                          </div>
-                          <span className="text-lg font-mono font-bold text-white">{dbStats?.usuarios_convertidos_google || 0}</span>
-                        </div>
-
-                        {/* Anonymous user count */}
-                        <div className="flex items-center justify-between p-3 bg-[#0d0d0f] border border-zinc-900 rounded-xl">
-                          <div className="flex items-center gap-2">
-                            <div className="w-2.5 h-2.5 rounded-full bg-zinc-500" />
-                            <div className="text-xs font-mono">
-                              <div className="text-white font-bold">Accesos Anónimos</div>
-                              <div className="text-[10px] text-zinc-500">Sesiones de invitado activas</div>
-                            </div>
-                          </div>
-                          <span className="text-lg font-mono font-bold text-white">{dbStats?.usuarios_anonimos || 0}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* ADMIN GEOLOCATION CARD */}
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    {/* Left: Metadata & Coordinates */}
-                    <div className="lg:col-span-1 bg-zinc-950 border border-zinc-900 rounded-2xl p-5 flex flex-col justify-between space-y-4">
-                      <div>
-                        <div className="flex items-center justify-between mb-3">
-                          <h4 className="text-xs uppercase font-mono tracking-wider font-bold text-zinc-400 flex items-center gap-1.5">
-                            <Navigation className="w-3.5 h-3.5 text-yellow-400 animate-pulse" />
-                            <span>Ubicación Admin</span>
-                          </h4>
-                          <span className={`px-2 py-0.5 rounded text-[8px] font-mono font-bold tracking-tight ${
-                            adminLocation?.error 
-                              ? 'bg-yellow-400/10 text-yellow-400 border border-yellow-400/20' 
-                              : adminLocation 
-                                ? 'bg-green-500/10 text-green-400 border border-green-500/20' 
-                                : 'bg-zinc-900 text-zinc-500 border border-zinc-800'
-                          }`}>
-                            {adminLocation?.error 
-                              ? 'SIMULACIÓN' 
-                              : adminLocation 
-                                ? 'GPS ACTIVO' 
-                                : 'BUSCANDO...'}
-                          </span>
-                        </div>
-
-                        <p className="text-xs text-zinc-400 font-mono leading-relaxed mb-4">
-                          Coordenadas geográficas en tiempo real del dispositivo administrador para auditoría de inicio de sesión y control territorial.
-                        </p>
-
-                        <div className="space-y-2.5 font-mono text-xs">
-                          <div className="bg-[#0b0b0c] border border-zinc-900/60 rounded-xl p-3 space-y-1.5">
-                            <div className="flex justify-between items-center text-[10px]">
-                              <span className="text-zinc-500">LATITUD</span>
-                              <span className="text-white font-bold">{adminLocation?.lat ? adminLocation.lat.toFixed(6) : '-12.046374'}</span>
-                            </div>
-                            <div className="flex justify-between items-center text-[10px]">
-                              <span className="text-zinc-500">LONGITUD</span>
-                              <span className="text-white font-bold">{adminLocation?.lon ? adminLocation.lon.toFixed(6) : '-77.042793'}</span>
-                            </div>
-                            <div className="flex justify-between items-center text-[10px]">
-                              <span className="text-zinc-500">PRECISIÓN</span>
-                              <span className="text-white font-bold">
-                                {adminLocation?.accuracy ? `±${adminLocation.accuracy.toFixed(1)}m` : 'N/A (Fija)'}
-                              </span>
-                            </div>
-                          </div>
-
-                          {adminLocation?.error && (
-                            <div className="bg-yellow-400/5 border border-yellow-400/10 rounded-xl p-3 text-[10px] text-yellow-300/80 leading-relaxed">
-                              ⚠️ {adminLocation.error}
-                            </div>
-                          )}
-
-                          <div className="flex items-center gap-2 text-[10px] text-zinc-500 pt-1.5">
-                            <Globe className="w-3.5 h-3.5" />
-                            <span>Región: {adminLocation?.error ? 'Lima, Perú (Sede Central)' : 'Ubicación local detectada'}</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <button
-                        onClick={() => {
-                          setAdminLocation(null);
-                          navigator.geolocation.getCurrentPosition(
-                            (pos) => setAdminLocation({ lat: pos.coords.latitude, lon: pos.coords.longitude, accuracy: pos.coords.accuracy, error: null }),
-                            (err) => setAdminLocation({ lat: -12.046374, lon: -77.042793, accuracy: null, error: "Permiso denegado o expirado." }),
-                            { enableHighAccuracy: true, timeout: 5000 }
-                          );
-                        }}
-                        className="w-full text-center font-mono text-[10px] uppercase font-bold tracking-wider text-zinc-400 hover:text-white border border-zinc-900 hover:border-zinc-800 bg-[#0c0c0d] hover:bg-zinc-900 px-3 py-2.5 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                      >
-                        <Compass className="w-3.5 h-3.5 text-yellow-400" />
-                        <span>Recargar Coordenadas GPS</span>
-                      </button>
+                    <div>
+                      <label className="block text-[10px] font-mono text-zinc-500 uppercase mb-1">Especialidad / Carrera</label>
+                      <input
+                        type="text"
+                        required
+                        value={newCandidateSpecialty}
+                        onChange={(e) => setNewCandidateSpecialty(e.target.value)}
+                        placeholder="Ej. Ingeniería de Sistemas"
+                        className="w-full bg-zinc-950 border border-zinc-900 focus:border-zinc-850 rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-750 outline-none transition-all font-sans"
+                      />
                     </div>
 
-                    {/* Right: Map Iframe Embed */}
-                    <div className="lg:col-span-2 bg-zinc-950 border border-zinc-900 rounded-2xl p-4 flex flex-col justify-between h-[320px] lg:h-auto min-h-[280px]">
-                      <div className="w-full h-full rounded-xl overflow-hidden border border-zinc-900 relative bg-[#0d0d0e]">
-                        <iframe 
-                          title="Ubicación del Administrador"
-                          src={`https://www.openstreetmap.org/export/embed.html?bbox=${(adminLocation?.lon || -77.042793) - 0.005}%2C${(adminLocation?.lat || -12.046374) - 0.005}%2C${(adminLocation?.lon || -77.042793) + 0.005}%2C${(adminLocation?.lat || -12.046374) + 0.005}&layer=mapnik&marker=${adminLocation?.lat || -12.046374}%2C${adminLocation?.lon || -77.042793}`}
-                          className="w-full h-full border-none opacity-80 hover:opacity-100 transition-opacity"
-                          allowFullScreen
-                          loading="lazy"
-                        />
-                        <div className="absolute top-2 right-2 bg-black/80 backdrop-blur-md border border-zinc-900 px-2.5 py-1 rounded-lg text-[9px] font-mono text-zinc-400 select-none">
-                          📍 Mapa del Servidor Central
-                        </div>
-                      </div>
+                    <div>
+                      <label className="block text-[10px] font-mono text-zinc-500 uppercase mb-1">Enlace de Foto (URL)</label>
+                      <input
+                        type="url"
+                        required
+                        value={newCandidatePhoto}
+                        onChange={(e) => setNewCandidatePhoto(e.target.value)}
+                        placeholder="https://images.unsplash.com/photo-..."
+                        className="w-full bg-zinc-950 border border-zinc-900 focus:border-zinc-850 rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-750 outline-none transition-all font-mono"
+                      />
+                      <p className="text-[9px] text-zinc-650 mt-1">Sugerencia: Usa imágenes de Unsplash o enlaces directos.</p>
                     </div>
-                  </div>
 
-                  <div>
-                    <h4 className="text-xs uppercase font-mono tracking-wider font-bold text-zinc-400 mb-4 flex items-center gap-2">
-                      <span>Últimos Murmullos del Campus</span>
-                    </h4>
-                    {comments.length === 0 ? (
-                      <p className="text-xs text-zinc-500 font-mono py-4 text-center">No hay comentarios en la plataforma.</p>
+                    <button
+                      type="submit"
+                      disabled={isSubmittingCandidate}
+                      className="w-full bg-yellow-400 hover:bg-yellow-350 disabled:bg-zinc-900 disabled:text-zinc-600 text-black font-mono font-black text-xs py-2.5 rounded-lg transition-all cursor-pointer uppercase tracking-wider"
+                    >
+                      {isSubmittingCandidate ? 'Guardando...' : 'Registrar Candidata'}
+                    </button>
+                  </form>
+                </div>
+
+                {/* Candidate List & Status */}
+                <div className="lg:col-span-2 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-mono font-black text-zinc-300 uppercase tracking-wider">
+                      Candidatas Registradas ({reinadoCandidates.length})
+                    </h3>
+                    {reinadoCandidates.length === 7 ? (
+                      <span className="text-[9px] font-mono font-black uppercase tracking-wider text-green-500 bg-green-500/10 border border-green-500/20 px-2 py-0.5 rounded">
+                        Límite Ideal de 7 chicas listo
+                      </span>
                     ) : (
-                      <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
-                        {comments.slice(0, 5).map(c => (
-                          <div key={c.id} className="bg-zinc-950 border border-zinc-900 rounded-2xl p-4 flex items-start justify-between gap-4">
-                            <div className="space-y-1.5 flex-1 min-w-0">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className="text-xs font-bold text-yellow-300 font-mono">{c.authorName}</span>
-                                <span className="text-[10px] text-zinc-500 font-mono">{c.authorNickname}</span>
-                                <span className="text-[9px] text-zinc-600 font-mono">{new Date(c.createdAt).toLocaleDateString()}</span>
-                              </div>
-                              <p className="text-xs text-zinc-300 leading-relaxed break-words">{c.text}</p>
-                            </div>
-                            <button
-                              onClick={() => handleDeleteComment(c.id)}
-                              className="text-red-500 hover:text-red-400 p-2 hover:bg-red-500/10 rounded-lg transition-colors cursor-pointer shrink-0"
-                              title="Eliminar comentario"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
+                      <span className="text-[9px] font-mono font-black uppercase tracking-wider text-yellow-500 bg-yellow-500/10 border border-yellow-500/20 px-2 py-0.5 rounded">
+                        Meta: Agregar 7 chicas
+                      </span>
                     )}
                   </div>
-                </div>
-              )}
 
-              {/* TAB 2: INSTITUTES */}
-              {adminActiveTab === 'institutes' && (
-                <div className="space-y-6">
-                  <div className="flex justify-between items-center pb-4 border-b border-zinc-900 mb-2">
-                    <h3 className="font-display font-bold text-lg text-white">Centros Educativos</h3>
-                    <button
-                      onClick={() => {
-                        if (!isGoogleUser) {
-                          triggerNotice("⚠️ Debes iniciar sesión con Google para registrar un centro educativo.");
-                          setIsJoinModalOpen(true);
-                        } else {
-                          setIsCreateInstituteModalOpen(true);
-                        }
-                      }}
-                      className="bg-yellow-400 text-black hover:bg-yellow-300 text-xs font-bold font-mono tracking-wider px-3 py-2 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
-                    >
-                      <Plus className="w-3.5 h-3.5" /> Agregar Centro
-                    </button>
-                  </div>
-
-                  {/* Search Bar for Centers */}
-                  <div className="relative">
-                    <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
-                    <input
-                      type="text"
-                      placeholder="Buscar centro educativo por nombre o ubicación..."
-                      value={adminInstituteSearch}
-                      onChange={(e) => setAdminInstituteSearch(e.target.value)}
-                      className="w-full bg-zinc-950 border border-zinc-900 rounded-xl py-2.5 pl-10 pr-4 text-xs font-mono text-white placeholder-zinc-500 focus:outline-none focus:border-yellow-400/40 transition-all"
-                    />
-                  </div>
-
-                  {filteredAdminInstitutes.length === 0 ? (
-                    <p className="text-xs text-zinc-500 font-mono py-8 text-center">
-                      {adminInstituteSearch.trim() 
-                        ? 'No se encontraron centros educativos con este criterio.' 
-                        : 'No hay instituciones registradas.'}
-                    </p>
+                  {reinadoCandidates.length === 0 ? (
+                    <div className="bg-[#040405] border border-zinc-900 rounded-xl p-8 text-center text-zinc-600 font-sans text-xs">
+                      No hay candidatas registradas todavía. Agrega algunas a la izquierda.
+                    </div>
                   ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {filteredAdminInstitutes.map(inst => (
-                        <div key={inst.id} className="bg-zinc-950 border border-zinc-900 rounded-2xl p-4 flex items-center gap-4">
-                          <img 
-                            src={inst.image || "https://images.unsplash.com/photo-1541339907198-e08756dedf3f?auto=format&fit=crop&q=80&w=300"} 
-                            alt={inst.name} 
-                            className="w-14 h-14 rounded-xl object-cover shrink-0 border border-zinc-800"
-                            referrerPolicy="no-referrer"
-                          />
-                          <div className="flex-1 min-w-0">
-                            <h4 className="text-xs font-bold text-white truncate">{inst.name}</h4>
-                            <p className="text-[10px] text-zinc-500 font-mono mt-0.5 truncate">{inst.location}</p>
-                            <div className="flex items-center gap-2.5 mt-2 text-[10px] font-mono text-yellow-400 flex-wrap">
-                              <span>📅 {inst.anoDeFundacion || 'N/A'}</span>
-                              <span>🆔 {inst.id}</span>
-                              {inst.isProfessorsBlocked && (
-                                <span className="bg-red-500/10 text-red-400 border border-red-500/25 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider">
-                                  🚫 Bloqueado
-                                </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[350px] overflow-y-auto pr-1">
+                      {reinadoCandidates.map((cand) => (
+                        <div key={cand.id} className="flex items-center justify-between gap-3 bg-[#040405] border border-zinc-900 p-3 rounded-xl hover:border-zinc-800 transition-all">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <img
+                              src={cand.photoUrl}
+                              alt={cand.name}
+                              referrerPolicy="no-referrer"
+                              className="w-10 h-10 rounded-lg object-cover bg-zinc-900 shrink-0"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100';
+                              }}
+                            />
+                            <div className="min-w-0">
+                              <h4 className="text-xs font-sans font-bold text-white truncate">{cand.name}</h4>
+                              {cand.specialty && (
+                                <p className="text-[10px] text-yellow-400 font-sans font-semibold truncate leading-tight">{cand.specialty}</p>
                               )}
+                              <p className="text-[10px] text-zinc-500 font-mono">ELO: <span className="text-yellow-400 font-black">{cand.elo ?? 1000}</span> • Votos: {cand.votes ?? 0}</p>
                             </div>
                           </div>
-                          
-                          <div className="flex items-center gap-2">
-                            {/* Toggle Lock Professors block */}
-                            <button
-                              onClick={() => handleToggleBlockProfessors(inst.id, !!inst.isProfessorsBlocked)}
-                              className={`p-2.5 rounded-xl transition-all border cursor-pointer flex items-center justify-center ${
-                                inst.isProfessorsBlocked 
-                                  ? 'bg-red-500/15 border-red-500/30 text-red-400 hover:bg-red-500/25' 
-                                  : 'bg-zinc-900 border-zinc-800 text-zinc-500 hover:text-white hover:border-zinc-700'
-                              }`}
-                              title={inst.isProfessorsBlocked ? "Desbloquear creación de profesores" : "Bloquear creación de profesores"}
-                            >
-                              <Lock className="w-4 h-4" />
-                            </button>
 
-                            <button
-                              onClick={() => handleDeleteInstitute(inst.id)}
-                              className="text-red-500 hover:text-red-400 p-2.5 hover:bg-red-500/10 rounded-xl transition-colors cursor-pointer"
-                              title="Eliminar centro"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* TAB 3: ALUMNOS */}
-              {adminActiveTab === 'alumnos' && (
-                <div className="space-y-6">
-                  <div className="pb-4 border-b border-zinc-900 mb-2">
-                    <h3 className="font-display font-bold text-lg text-white">Pasaportes Estudiantiles</h3>
-                  </div>
-
-                  {alumnos.length === 0 ? (
-                    <p className="text-xs text-zinc-500 font-mono py-8 text-center">No hay alumnos nominados o creados.</p>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left text-xs font-mono">
-                        <thead>
-                          <tr className="border-b border-zinc-900 text-zinc-500 font-bold uppercase tracking-wider text-[9px] pb-3">
-                            <th className="py-3 px-2">Alumno</th>
-                            <th className="py-3 px-2">Categoría</th>
-                            <th className="py-3 px-2">Sede / Curso</th>
-                            <th className="py-3 px-2 text-center">WikiScore</th>
-                            <th className="py-3 px-2 text-center">Verificación</th>
-                            <th className="py-3 px-2 text-right">Acciones</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-zinc-900/60">
-                          {alumnos.map(al => {
-                            const inst = institutes.find(i => i.id === al.instituteId);
-                            return (
-                              <tr key={al.id} className="hover:bg-zinc-950/40">
-                                <td className="py-3 px-2 flex items-center gap-2.5 min-w-[200px]">
-                                  <img 
-                                    src={al.avatar || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=100"} 
-                                    alt={al.name} 
-                                    className="w-8 h-8 rounded-full object-cover shrink-0 border border-zinc-800"
-                                    referrerPolicy="no-referrer"
-                                  />
-                                  <div>
-                                    <p className="font-bold text-white text-xs">{al.name}</p>
-                                    <p className="text-[10px] text-zinc-500">@{al.nickname || 'sin-user'}</p>
-                                  </div>
-                                </td>
-                                <td className="py-3 px-2">
-                                  <span className="bg-zinc-900 text-zinc-400 px-2 py-0.5 rounded text-[9px] font-bold">
-                                    {al.category}
-                                  </span>
-                                </td>
-                                <td className="py-3 px-2 max-w-[150px] truncate">
-                                  <p className="text-zinc-300 truncate">{inst ? inst.shortName : 'N/A'}</p>
-                                  <p className="text-[10px] text-zinc-500 truncate">{al.course}</p>
-                                </td>
-                                <td className="py-3 px-2 text-center text-yellow-400 font-bold">
-                                  🔥 {al.points}
-                                </td>
-                                <td className="py-3 px-2 text-center">
-                                  <button
-                                    onClick={() => handleToggleVerifyAlumno(al)}
-                                    className={`px-2 py-1 rounded text-[9px] font-bold cursor-pointer transition-all ${
-                                      al.isVerified 
-                                        ? 'bg-yellow-400/10 text-yellow-400 border border-yellow-400/20' 
-                                        : 'bg-zinc-900 text-zinc-600 border border-zinc-800'
-                                    }`}
-                                  >
-                                    {al.isVerified ? 'VERIFICADO' : 'SIN VERIFICAR'}
-                                  </button>
-                                </td>
-                                <td className="py-3 px-2 text-right">
-                                  <button
-                                    onClick={() => handleDeleteAlumno(al.id)}
-                                    className="text-red-500 hover:text-red-400 p-2 hover:bg-red-500/10 rounded-lg transition-colors cursor-pointer"
-                                    title="Eliminar Alumno"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* TAB 4: PROFESORES */}
-              {adminActiveTab === 'profesores' && (
-                <div className="space-y-6">
-                  <div className="pb-4 border-b border-zinc-900 mb-2">
-                    <h3 className="font-display font-bold text-lg text-white">Docentes de la Comunidad</h3>
-                  </div>
-
-                  {perfiles.length === 0 ? (
-                    <p className="text-xs text-zinc-500 font-mono py-8 text-center">No hay profesores calificados o registrados.</p>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left text-xs font-mono">
-                        <thead>
-                          <tr className="border-b border-zinc-900 text-zinc-500 font-bold uppercase tracking-wider text-[9px] pb-3">
-                            <th className="py-3 px-2">Docente</th>
-                            <th className="py-3 px-2">Especialidad</th>
-                            <th className="py-3 px-2">Sede</th>
-                            <th className="py-3 px-2 text-center">Calificación</th>
-                            <th className="py-3 px-2 text-right">Acciones</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-zinc-900/60">
-                          {perfiles.map(p => {
-                            const inst = institutes.find(i => i.id === p.instituteId);
-                            return (
-                              <tr key={p.id} className="hover:bg-zinc-950/40">
-                                <td className="py-3 px-2 min-w-[200px]">
-                                  <p className="font-bold text-white text-xs">{p.nombreCompleto || p.name}</p>
-                                  <p className="text-[10px] text-zinc-500">Género: {p.sexo || 'N/A'}</p>
-                                </td>
-                                <td className="py-3 px-2 text-zinc-300">
-                                  {p.materia || 'General'}
-                                </td>
-                                <td className="py-3 px-2 max-w-[150px] truncate text-zinc-400">
-                                  {inst ? inst.name : 'ID: ' + p.instituteId}
-                                </td>
-                                <td className="py-3 px-2 text-center text-yellow-400 font-bold">
-                                  ★ {typeof p.rating === 'number' ? p.rating.toFixed(1) : (p.rating || 'N/A')}
-                                </td>
-                                <td className="py-3 px-2 text-right">
-                                  <button
-                                    onClick={() => handleDeleteProfessor(p.id, p.instituteId)}
-                                    className="text-red-500 hover:text-red-400 p-2 hover:bg-red-500/10 rounded-lg transition-colors cursor-pointer"
-                                    title="Eliminar Docente"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* TAB 5: COMMENTS */}
-              {adminActiveTab === 'comments' && (
-                <div className="space-y-6">
-                  <div className="pb-4 border-b border-zinc-900 mb-2">
-                    <h3 className="font-display font-bold text-lg text-white">Moderación de Murmullos</h3>
-                  </div>
-
-                  {comments.length === 0 ? (
-                    <p className="text-xs text-zinc-500 font-mono py-8 text-center">No hay comentarios o murmullos publicados.</p>
-                  ) : (
-                    <div className="space-y-3 pr-2">
-                      {comments.map(c => (
-                        <div key={c.id} className="bg-zinc-950 border border-zinc-900 rounded-2xl p-4 flex items-start justify-between gap-4">
-                          <div className="space-y-1.5 flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-xs font-bold text-yellow-300 font-mono">{c.authorName}</span>
-                              <span className="text-[10px] text-zinc-500 font-mono">{c.authorNickname}</span>
-                              <span className="bg-zinc-900 text-zinc-500 px-1.5 py-0.5 rounded text-[9px] font-bold">
-                                {c.statusType}
-                              </span>
-                              <span className="text-[9px] text-zinc-600 font-mono">{new Date(c.createdAt).toLocaleString()}</span>
-                            </div>
-                            <p className="text-xs text-zinc-300 leading-relaxed break-words">{c.text}</p>
-                          </div>
                           <button
-                            onClick={() => handleDeleteComment(c.id)}
-                            className="text-red-500 hover:text-red-400 p-2.5 hover:bg-red-500/10 rounded-xl transition-colors cursor-pointer shrink-0"
-                            title="Eliminar Comentario"
+                            onClick={() => handleDeleteCandidate(cand.id)}
+                            className="text-zinc-500 hover:text-red-500 p-1.5 hover:bg-red-500/10 rounded-lg transition-all shrink-0"
+                            title="Eliminar"
                           >
-                            <Trash2 className="w-4 h-4" />
+                            <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       ))}
                     </div>
                   )}
                 </div>
-              )}
-
+              </div>
             </div>
           </motion.div>
         )}

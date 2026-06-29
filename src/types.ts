@@ -22,7 +22,6 @@ export interface Institute {
   anoDeFundacion?: number | null;
   redesSociales?: RedesSociales;
   tipo?: 'instituto' | 'colegio' | 'universidad';
-  isProfessorsBlocked?: boolean;
 }
 
 export interface Alumno {
