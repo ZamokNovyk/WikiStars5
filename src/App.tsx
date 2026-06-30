@@ -5859,69 +5859,99 @@ export default function App() {
               </div>
             </div>
 
-            {/* Reinado ELO Management Section */}
-            <div className="bg-[#09090b] border border-zinc-900 rounded-2xl p-6 space-y-6 mt-8">
-              <div className="flex items-center gap-2 pb-2 border-b border-zinc-900">
-                <Crown className="w-4 h-4 text-yellow-400" />
-                <h2 className="text-xs font-mono font-bold uppercase tracking-widest text-zinc-400">
-                  Gestión del Reinado - Versus ELO
-                </h2>
-              </div>
+              {/* Reinado ELO Management Section */}
+              <div className="bg-[#09090b] border border-zinc-900 rounded-2xl p-6 space-y-6 mt-8">
+                <div className="flex items-center gap-2 pb-2 border-b border-zinc-900">
+                  <Crown className="w-4 h-4 text-yellow-400" />
+                  <h2 className="text-xs font-mono font-bold uppercase tracking-widest text-zinc-400">
+                    Gestión del Reinado - Versus ELO
+                  </h2>
+                </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Form to add candidate & Timer config stacked */}
-                <div className="space-y-4">
-                  <div className="bg-[#040405] border border-zinc-900 p-5 rounded-xl space-y-4">
-                    <h3 className="text-xs font-mono font-black text-zinc-300 uppercase tracking-wider">
-                      Agregar Nueva Candidata
-                    </h3>
-                    <form onSubmit={handleRegisterCandidate} className="space-y-3.5">
-                      <div>
-                        <label className="block text-[10px] font-mono text-zinc-500 uppercase mb-1">Nombre Completo</label>
-                        <input
-                          type="text"
-                          required
-                          value={newCandidateName}
-                          onChange={(e) => setNewCandidateName(e.target.value)}
-                          placeholder="Ej. Maria Belen"
-                          className="w-full bg-zinc-950 border border-zinc-900 focus:border-zinc-850 rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-750 outline-none transition-all font-sans"
-                        />
-                      </div>
+                {/* Educational Center Selector for Management */}
+                <div className="bg-zinc-950/50 border border-zinc-900/60 p-4 rounded-xl space-y-2 text-left">
+                  <label className="block text-[10px] font-mono text-zinc-500 uppercase tracking-wider font-bold">
+                    Seleccionar Institución para Gestionar Reinado:
+                  </label>
+                  <select
+                    value={selectedInstituteId || ''}
+                    onChange={(e) => {
+                      const val = e.target.value || null;
+                      setSelectedInstituteId(val);
+                    }}
+                    className="w-full bg-zinc-950 border border-zinc-900 focus:border-zinc-850 rounded-lg px-3 py-2.5 text-xs text-white outline-none font-sans"
+                  >
+                    <option value="" className="text-zinc-650">-- Seleccione una Institución --</option>
+                    {institutes.map((inst) => (
+                      <option key={inst.id} value={inst.id} className="text-white">
+                        {inst.name} ({inst.location})
+                      </option>
+                    ))}
+                  </select>
+                  {!selectedInstituteId && (
+                    <p className="text-[10px] font-mono text-yellow-400/85 uppercase tracking-wide flex items-center gap-1.5 mt-1 animate-pulse">
+                      <span>⚠️</span> Debe seleccionar una institución antes de poder registrar candidatas o ver las registradas.
+                    </p>
+                  )}
+                </div>
 
-                      <div>
-                        <label className="block text-[10px] font-mono text-zinc-500 uppercase mb-1">Especialidad / Carrera</label>
-                        <input
-                          type="text"
-                          required
-                          value={newCandidateSpecialty}
-                          onChange={(e) => setNewCandidateSpecialty(e.target.value)}
-                          placeholder="Ej. Ingeniería de Sistemas"
-                          className="w-full bg-zinc-950 border border-zinc-900 focus:border-zinc-850 rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-750 outline-none transition-all font-sans"
-                        />
-                      </div>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  {/* Form to add candidate & Timer config stacked */}
+                  <div className="space-y-4">
+                    <div className="bg-[#040405] border border-zinc-900 p-5 rounded-xl space-y-4">
+                      <h3 className="text-xs font-mono font-black text-zinc-300 uppercase tracking-wider">
+                        Agregar Nueva Candidata
+                      </h3>
+                      <form onSubmit={handleRegisterCandidate} className="space-y-3.5">
+                        <div>
+                          <label className="block text-[10px] font-mono text-zinc-500 uppercase mb-1">Nombre Completo</label>
+                          <input
+                            type="text"
+                            required
+                            disabled={!selectedInstituteId}
+                            value={newCandidateName}
+                            onChange={(e) => setNewCandidateName(e.target.value)}
+                            placeholder={selectedInstituteId ? "Ej. Maria Belen" : "Selecciona una institución primero"}
+                            className="w-full bg-zinc-950 border border-zinc-900 focus:border-zinc-850 rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-750 outline-none transition-all font-sans disabled:opacity-50"
+                          />
+                        </div>
 
-                      <div>
-                        <label className="block text-[10px] font-mono text-zinc-500 uppercase mb-1">Enlace de Foto (URL)</label>
-                        <input
-                          type="url"
-                          required
-                          value={newCandidatePhoto}
-                          onChange={(e) => setNewCandidatePhoto(e.target.value)}
-                          placeholder="https://images.unsplash.com/photo-..."
-                          className="w-full bg-zinc-950 border border-zinc-900 focus:border-zinc-850 rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-750 outline-none transition-all font-mono"
-                        />
-                        <p className="text-[9px] text-zinc-650 mt-1">Sugerencia: Usa imágenes de Unsplash o enlaces directos.</p>
-                      </div>
+                        <div>
+                          <label className="block text-[10px] font-mono text-zinc-500 uppercase mb-1">Especialidad / Carrera</label>
+                          <input
+                            type="text"
+                            required
+                            disabled={!selectedInstituteId}
+                            value={newCandidateSpecialty}
+                            onChange={(e) => setNewCandidateSpecialty(e.target.value)}
+                            placeholder={selectedInstituteId ? "Ej. Ingeniería de Sistemas" : "Selecciona una institución primero"}
+                            className="w-full bg-zinc-950 border border-zinc-900 focus:border-zinc-850 rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-750 outline-none transition-all font-sans disabled:opacity-50"
+                          />
+                        </div>
 
-                      <button
-                        type="submit"
-                        disabled={isSubmittingCandidate}
-                        className="w-full bg-yellow-400 hover:bg-yellow-350 disabled:bg-zinc-900 disabled:text-zinc-600 text-black font-mono font-black text-xs py-2.5 rounded-lg transition-all cursor-pointer uppercase tracking-wider"
-                      >
-                        {isSubmittingCandidate ? 'Guardando...' : 'Registrar Candidata'}
-                      </button>
-                    </form>
-                  </div>
+                        <div>
+                          <label className="block text-[10px] font-mono text-zinc-500 uppercase mb-1">Enlace de Foto (URL)</label>
+                          <input
+                            type="url"
+                            required
+                            disabled={!selectedInstituteId}
+                            value={newCandidatePhoto}
+                            onChange={(e) => setNewCandidatePhoto(e.target.value)}
+                            placeholder={selectedInstituteId ? "https://images.unsplash.com/photo-..." : "Selecciona una institución primero"}
+                            className="w-full bg-zinc-950 border border-zinc-900 focus:border-zinc-850 rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-750 outline-none transition-all font-mono disabled:opacity-50"
+                          />
+                          <p className="text-[9px] text-zinc-650 mt-1">Sugerencia: Usa imágenes de Unsplash o enlaces directos.</p>
+                        </div>
+
+                        <button
+                          type="submit"
+                          disabled={!selectedInstituteId || isSubmittingCandidate}
+                          className="w-full bg-yellow-400 hover:bg-yellow-350 disabled:bg-zinc-900 disabled:text-zinc-600 text-black font-mono font-black text-xs py-2.5 rounded-lg transition-all cursor-pointer uppercase tracking-wider disabled:cursor-not-allowed"
+                        >
+                          {isSubmittingCandidate ? 'Guardando...' : 'Registrar Candidata'}
+                        </button>
+                      </form>
+                    </div>
 
                   {/* Countdown Timer Config */}
                   <div className="bg-[#040405] border border-zinc-900 p-5 rounded-xl space-y-4">
