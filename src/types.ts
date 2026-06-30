@@ -56,3 +56,10 @@ export interface AlumnoComment {
   createdAt: string;
   likes: number;
 }
+
+export interface ReinadaEstadistica {
+  id: string; // Document ID
+  vecesCompartido: number;
+  totalVotosVersus: number;
+  totalVotosOtraVez: number;
+}

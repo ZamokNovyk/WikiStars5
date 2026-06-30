@@ -2,6 +2,9 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { ResultadosView } from './components/ResultadosView';
 import { 
   Search, 
+  ThumbsUp,
+  ThumbsDown,
+  BarChart2,
   Award, 
   Sparkles, 
   TrendingUp, 
@@ -640,6 +643,12 @@ export default function App() {
   const [reinadoConfig, setReinadoConfig] = useState<{ deadlineDate: string | null } | null>(null);
   const [votedPairs, setVotedPairs] = useState<string[]>([]);
   const [now, setNow] = useState<number>(Date.now());
+  const [reinadoSubTab, setReinadoSubTab] = useState<'elos' | 'coronas' | 'estadistica'>('elos');
+  const [reinadaStats, setReinadaStats] = useState<ReinadaEstadistica | null>(null);
+  const [selectedEstadisticaCandId, setSelectedEstadisticaCandId] = useState<string | null>(null);
+  const [candWinsList, setCandWinsList] = useState<any[]>([]);
+  const [candLossesList, setCandLossesList] = useState<any[]>([]);
+  const [isLoadingEstadisticas, setIsLoadingEstadisticas] = useState(false);
 
   // Ticker for ELO countdown real-time display
   useEffect(() => {
@@ -871,6 +880,15 @@ export default function App() {
 
   // Load reinado candidates for active institute in real-time
   useEffect(() => {
+    const unsubscribe = onSnapshot(doc(db, 'reinada.estadistica', 'general'), (snap) => {
+      if (snap.exists()) {
+        setReinadaStats(snap.data() as ReinadaEstadistica);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
     if (!selectedInstituteId) {
       setReinadoCandidates([]);
       return;
@@ -910,6 +928,48 @@ export default function App() {
 
     return () => unsubscribe();
   }, [selectedInstituteId]);
+
+  // Load versus statistics in real-time for selected candidate
+  useEffect(() => {
+    if (!selectedInstituteId || !selectedEstadisticaCandId) {
+      setCandWinsList([]);
+      setCandLossesList([]);
+      return;
+    }
+
+    setIsLoadingEstadisticas(true);
+
+    const winsRef = collection(db, 'centros.educativos', selectedInstituteId, 'reinado', selectedEstadisticaCandId, 'versus.ganados');
+    const unsubWins = onSnapshot(winsRef, (snapshot) => {
+      const wins: any[] = [];
+      snapshot.forEach((snapDoc) => {
+        wins.push({ id: snapDoc.id, ...snapDoc.data() });
+      });
+      wins.sort((a, b) => (b.count ?? 0) - (a.count ?? 0));
+      setCandWinsList(wins);
+    }, (error) => {
+      console.warn("Error fetching versus.ganados:", error);
+    });
+
+    const lossesRef = collection(db, 'centros.educativos', selectedInstituteId, 'reinado', selectedEstadisticaCandId, 'versus.perdidos');
+    const unsubLosses = onSnapshot(lossesRef, (snapshot) => {
+      const losses: any[] = [];
+      snapshot.forEach((snapDoc) => {
+        losses.push({ id: snapDoc.id, ...snapDoc.data() });
+      });
+      losses.sort((a, b) => (b.count ?? 0) - (a.count ?? 0));
+      setCandLossesList(losses);
+      setIsLoadingEstadisticas(false);
+    }, (error) => {
+      console.warn("Error fetching versus.perdidos:", error);
+      setIsLoadingEstadisticas(false);
+    });
+
+    return () => {
+      unsubWins();
+      unsubLosses();
+    };
+  }, [selectedInstituteId, selectedEstadisticaCandId]);
 
   // Check user's votes for the selected professor
   useEffect(() => {
@@ -2191,11 +2251,35 @@ export default function App() {
         elo: newRB
       }, { merge: true });
 
+      // Update versus.ganados subcollection for the winner
+      const winDocRef = doc(db, 'centros.educativos', selectedInstituteId, 'reinado', winnerId, 'versus.ganados', loserId);
+      const winDocSnap = await getDoc(winDocRef);
+      const currentWinCount = winDocSnap.exists() ? (winDocSnap.data().count ?? 0) : 0;
+      await setDoc(winDocRef, {
+        opponentId: loserId,
+        opponentName: loser.name,
+        opponentPhoto: loser.photoUrl || '',
+        count: currentWinCount + 1,
+        timestamp: new Date().toISOString()
+      }, { merge: true });
+
+      // Update versus.perdidos subcollection for the loser
+      const loseDocRef = doc(db, 'centros.educativos', selectedInstituteId, 'reinado', loserId, 'versus.perdidos', winnerId);
+      const loseDocSnap = await getDoc(loseDocRef);
+      const currentLoseCount = loseDocSnap.exists() ? (loseDocSnap.data().count ?? 0) : 0;
+      await setDoc(loseDocRef, {
+        opponentId: winnerId,
+        opponentName: winner.name,
+        opponentPhoto: winner.photoUrl || '',
+        count: currentLoseCount + 1,
+        timestamp: new Date().toISOString()
+      }, { merge: true });
+
       // Add to voted pairs list
       const votedPairKey = winnerId < loserId ? `${winnerId}::${loserId}` : `${loserId}::${winnerId}`;
       setVotedPairs(prev => [...prev, votedPairKey]);
     } catch (error) {
-      console.error("Error voting candidate:", error);
+      handleFirestoreError(error, OperationType.WRITE, `centros.educativos/${selectedInstituteId}/reinado/${winnerId}/versus`);
     }
   };
 
@@ -4458,8 +4542,8 @@ export default function App() {
                   exit={{ opacity: 0 }}
                   className="space-y-8"
                 >
-                  {/* ELO Matchup Versus Arena */}
-                  <div className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl p-6 sm:p-8 space-y-6">
+                      {/* ELO Matchup Versus Arena */}
+                      <div className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl p-6 sm:p-8 space-y-6">
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-zinc-900 pb-4 gap-4">
                       <div className="text-left space-y-1">
                         <span className="text-[10px] font-mono uppercase tracking-widest text-yellow-400 font-black">ENFRENTAMIENTO DIRECTO</span>
@@ -4776,11 +4860,27 @@ export default function App() {
                           </div>
                         )}
                       </div>
-                    )}
-                  </div>
+                  </motion.div>
 
                   {/* ELO Leaderboard list */}
                   <div className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl p-6 sm:p-8 space-y-5">
+                    {/* Tabs navigation */}
+                    <div className="flex w-full items-center gap-2 border-b border-zinc-900 pb-4 mb-4">
+                      {[
+                        { id: 'elos', label: 'ELOs ⚔️' },
+                        { id: 'coronas', label: 'Coronas 👑' },
+                        { id: 'estadistica', label: 'Estadística 📊' }
+                      ].map((tab) => (
+                        <button
+                          key={tab.id}
+                          onClick={() => setReinadoSubTab(tab.id as any)}
+                          className={`flex-1 px-4 py-2 rounded-lg text-xs font-bold transition-colors ${reinadoSubTab === tab.id ? 'bg-yellow-500 text-black' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}`}
+                        >
+                          {tab.label}
+                        </button>
+                      ))}
+                    </div>
+
                     <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
                       <div className="flex items-center gap-2">
                         <Trophy className="w-4 h-4 text-yellow-400" />
@@ -4879,9 +4979,373 @@ export default function App() {
                       </div>
                     )}
                   </div>
+                  </>
+                  )}
+
+                  {/* SUB-TAB 2: CORONAS */}
+                  {reinadoSubTab === 'coronas' && (
+                    <motion.div
+                      key="tab-coronas-panel"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="space-y-6"
+                    >
+                      {/* Royal Header Intro */}
+                      <div className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl p-6 sm:p-8 space-y-4 text-center max-w-3xl mx-auto">
+                        <div className="w-16 h-16 rounded-full bg-yellow-400/10 border-2 border-yellow-400/20 flex items-center justify-center mx-auto text-yellow-400 shadow-[0_0_20px_rgba(250,204,21,0.1)]">
+                          <Crown className="w-8 h-8 animate-bounce" />
+                        </div>
+                        <div className="space-y-1.5">
+                          <h4 className="text-xl font-display font-black text-white uppercase tracking-wider">
+                            EL TRONO DE CORONAS 👑
+                          </h4>
+                          <p className="text-xs text-zinc-400 max-w-xl mx-auto leading-relaxed font-sans">
+                            Cada vez que una candidata asciende al puesto #1 en el ranking ELO y desplaza a la anterior líder, se le otorga una <strong>Corona de Honor</strong>. El ranking a continuación destaca a las reinas más coronadas de la institución.
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Crowns Leaderboard */}
+                      <div className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl p-6 sm:p-8 space-y-5">
+                        <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
+                          <div className="flex items-center gap-2">
+                            <Crown className="w-4 h-4 text-yellow-400" />
+                            <h4 className="font-mono text-xs font-black text-zinc-300 uppercase tracking-widest">
+                              REINAS MÁS CORONADAS (Orden Descendente)
+                            </h4>
+                          </div>
+                        </div>
+
+                        {reinadoCandidates.length === 0 ? (
+                          <div className="bg-[#040405] border border-zinc-900 rounded-xl p-8 text-center text-zinc-500 font-sans text-xs">
+                            No hay candidatas registradas todavía en el reinado.
+                          </div>
+                        ) : (
+                          <div className="space-y-3 max-w-2xl mx-auto">
+                            {[...reinadoCandidates]
+                              .sort((a, b) => (b.crowns ?? 0) - (a.crowns ?? 0))
+                              .map((cand, index) => {
+                                const hasCrowns = (cand.crowns ?? 0) > 0;
+                                return (
+                                  <div
+                                    key={`crown-rank-${cand.id}`}
+                                    className={`flex items-center justify-between gap-4 p-4 rounded-xl border transition-all ${
+                                      hasCrowns && index === 0
+                                        ? 'bg-gradient-to-r from-yellow-400/5 via-[#0b0b0c] to-[#0b0b0c] border-yellow-400/30 shadow-[0_4px_25px_rgba(250,204,21,0.06)]'
+                                        : 'bg-[#040405] border-zinc-900 hover:border-zinc-800'
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-3.5 min-w-0">
+                                      {/* Rank Badge */}
+                                      <div className="flex items-center justify-center w-8 shrink-0">
+                                        {hasCrowns && index === 0 ? (
+                                          <div className="flex flex-col items-center">
+                                            <Crown className="w-4 h-4 text-yellow-400 animate-pulse mb-0.5" />
+                                            <span className="text-xs font-mono font-black text-yellow-400">#1</span>
+                                          </div>
+                                        ) : (
+                                          <span className="text-xs font-mono font-bold text-zinc-500">#{index + 1}</span>
+                                        )}
+                                      </div>
+
+                                      {/* Avatar */}
+                                      <img
+                                        src={cand.photoUrl}
+                                        alt={cand.name}
+                                        referrerPolicy="no-referrer"
+                                        className={`w-11 h-11 rounded-lg object-cover bg-zinc-950 shrink-0 ${
+                                          hasCrowns && index === 0 ? 'ring-2 ring-yellow-400/40' : 'border border-zinc-800'
+                                        }`}
+                                        onError={(e) => {
+                                          (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100';
+                                        }}
+                                      />
+
+                                      <div className="min-w-0 text-left">
+                                        <span className={`block text-xs font-bold uppercase truncate ${hasCrowns && index === 0 ? 'text-yellow-400 font-extrabold' : 'text-zinc-200'}`}>
+                                          {cand.name}
+                                        </span>
+                                        {cand.specialty && (
+                                          <span className="block text-[10px] text-zinc-400 font-sans uppercase tracking-wider my-0.5">
+                                            {cand.specialty}
+                                          </span>
+                                        )}
+                                        <span className="block text-[10px] text-zinc-550 font-mono">
+                                          Puntaje ELO: {cand.elo ?? 1000} PTS
+                                        </span>
+                                      </div>
+                                    </div>
+
+                                    {/* Crowns Count */}
+                                    <div className="text-right shrink-0 bg-zinc-950 px-3.5 py-2 rounded-xl border border-zinc-900 flex items-center gap-1.5 shadow-inner">
+                                      <Crown className={`w-4 h-4 ${hasCrowns ? 'text-yellow-400 animate-pulse' : 'text-zinc-700'}`} />
+                                      <span className={`font-mono text-sm font-black ${hasCrowns ? 'text-yellow-400' : 'text-zinc-500'}`}>
+                                        x{cand.crowns ?? 0}
+                                      </span>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                          </div>
+                        )}
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {/* SUB-TAB 3: ESTADÍSTICA */}
+                  {reinadoSubTab === 'estadistica' && (
+                    <motion.div
+                      key="tab-estadistica-panel"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="space-y-6"
+                    >
+                      {/* Sub-tab Intro */}
+                      <div className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl p-6 sm:p-8 space-y-2 text-left">
+                        <h4 className="text-base font-display font-black text-white uppercase tracking-wider flex items-center gap-2">
+                          <BarChart2 className="w-5 h-5 text-yellow-400" />
+                          Estadísticas Generales del Reinado
+                        </h4>
+                        {/* Stats Grid */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4">
+                           <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-900 text-center">
+                             <span className="text-zinc-500 font-mono text-[10px] uppercase block mb-1">Veces compartido</span>
+                             <span className="block text-xl font-black text-yellow-400">{reinadaStats?.vecesCompartido ?? 0}</span>
+                           </div>
+                           <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-900 text-center">
+                             <span className="text-zinc-500 font-mono text-[10px] uppercase block mb-1">Total votos versus</span>
+                             <span className="block text-xl font-black text-white">{reinadaStats?.totalVotosVersus ?? 0}</span>
+                           </div>
+                           <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-900 text-center">
+                             <span className="text-zinc-500 font-mono text-[10px] uppercase block mb-1">Votos "otra vez"</span>
+                             <span className="block text-xl font-black text-zinc-300">{reinadaStats?.totalVotosOtraVez ?? 0}</span>
+                           </div>
+                         </div>
+                        <p className="text-xs text-zinc-400 leading-relaxed max-w-2xl font-sans">
+                          Explora el registro oficial de duelos de cada candidata. Selecciona una candidata para ver en tiempo real contra quiénes ha ganado y contra quiénes ha perdido en el Versus ELO.
+                        </p>
+                      </div>
+
+                      {/* Grid / Selection Strip of Candidates */}
+                      <div className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl p-4 sm:p-6 space-y-4">
+                        <span className="block text-[10px] font-mono uppercase tracking-widest text-zinc-500 font-bold text-left">
+                          Seleccionar Candidata para Inspeccionar Estadísticas:
+                        </span>
+                        
+                        <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent">
+                          {reinadoCandidates.map((cand) => {
+                            const isSelected = selectedEstadisticaCandId === cand.id || (!selectedEstadisticaCandId && reinadoCandidates[0]?.id === cand.id);
+                            return (
+                              <button
+                                key={`inspect-select-${cand.id}`}
+                                onClick={() => setSelectedEstadisticaCandId(cand.id)}
+                                className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl border shrink-0 text-left cursor-pointer transition-all ${
+                                  isSelected
+                                    ? 'bg-yellow-400/10 border-yellow-400 text-yellow-400 font-black shadow-md'
+                                    : 'bg-zinc-950 border-zinc-900 text-zinc-400 hover:text-white hover:border-zinc-800'
+                                }`}
+                              >
+                                <img
+                                  src={cand.photoUrl}
+                                  alt={cand.name}
+                                  referrerPolicy="no-referrer"
+                                  className={`w-7 h-7 rounded-full object-cover bg-zinc-950 ${
+                                    isSelected ? 'border-2 border-yellow-400' : 'border border-zinc-850'
+                                  }`}
+                                />
+                                <div className="text-xs">
+                                  <span className="block font-sans font-bold uppercase truncate max-w-[100px]">{cand.name}</span>
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Main Selected Candidate Stats Panel */}
+                      {(() => {
+                        const activeCandId = selectedEstadisticaCandId || reinadoCandidates[0]?.id;
+                        const activeCand = reinadoCandidates.find(c => c.id === activeCandId);
+                        
+                        if (!activeCand) {
+                          return (
+                            <div className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl p-8 text-center text-zinc-500 font-sans text-xs">
+                              Selecciona una candidata para ver sus registros de versus.
+                            </div>
+                          );
+                        }
+
+                        // Calculate overall stats
+                        const totalWinsCount = candWinsList.reduce((acc, curr) => acc + (curr.count ?? 0), 0);
+                        const totalLossesCount = candLossesList.reduce((acc, curr) => acc + (curr.count ?? 0), 0);
+                        const totalDuels = totalWinsCount + totalLossesCount;
+                        const winRate = totalDuels > 0 ? Math.round((totalWinsCount / totalDuels) * 100) : 0;
+
+                        return (
+                          <div className="space-y-6">
+                            {/* Candidate Summary Card */}
+                            <div className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl p-6 sm:p-8 flex flex-col sm:flex-row gap-6 items-center text-left relative overflow-hidden">
+                              <div className="absolute top-0 right-0 w-64 h-64 bg-[radial-gradient(ellipse_at_center,rgba(250,204,21,0.03)_0%,transparent_70%)] pointer-events-none rounded-full blur-2xl" />
+
+                              <img
+                                src={activeCand.photoUrl}
+                                alt={activeCand.name}
+                                referrerPolicy="no-referrer"
+                                className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl object-cover bg-zinc-950 border-2 border-yellow-400 shrink-0 shadow-lg"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=300';
+                                }}
+                              />
+
+                              <div className="flex-1 space-y-1">
+                                <span className="inline-block px-2.5 py-0.5 rounded bg-yellow-400/10 border border-yellow-400/20 text-yellow-400 text-[9px] font-mono font-black uppercase tracking-wider">
+                                  REGISTRO OFICIAL
+                                </span>
+                                <h5 className="text-xl font-display font-black text-white uppercase tracking-wide font-extrabold">
+                                  {activeCand.name}
+                                </h5>
+                                {activeCand.specialty && (
+                                  <p className="text-xs text-yellow-400 font-sans font-bold uppercase tracking-wider">
+                                    {activeCand.specialty}
+                                  </p>
+                                )}
+                                <div className="flex flex-wrap items-center gap-3 pt-1 text-[11px] font-mono text-zinc-400">
+                                  <span>PUNTOS ELO: <strong className="text-white font-extrabold">{activeCand.elo ?? 1000}</strong></span>
+                                  <span>•</span>
+                                  <span>CORONAS: <strong className="text-white font-extrabold">{activeCand.crowns ?? 0}</strong></span>
+                                  <span>•</span>
+                                  <span>VOTOS DIRECTOS: <strong className="text-white font-extrabold">{activeCand.votes ?? 0}</strong></span>
+                                </div>
+                              </div>
+
+                              {/* Overall Metrics Column */}
+                              <div className="grid grid-cols-3 gap-2.5 w-full sm:w-auto shrink-0 border-t sm:border-t-0 sm:border-l border-zinc-900 pt-4 sm:pt-0 sm:pl-6">
+                                <div className="bg-zinc-950/60 border border-zinc-900/60 rounded-xl p-2.5 text-center min-w-[70px]">
+                                  <span className="block text-[8px] font-mono text-zinc-500 uppercase">Duelos</span>
+                                  <span className="text-xs font-mono font-black text-white">{totalDuels}</span>
+                                </div>
+                                <div className="bg-zinc-950/60 border border-zinc-900/60 rounded-xl p-2.5 text-center min-w-[70px]">
+                                  <span className="block text-[8px] font-mono text-green-500 uppercase font-black">Victorias</span>
+                                  <span className="text-xs font-mono font-black text-green-400">+{totalWinsCount}</span>
+                                </div>
+                                <div className="bg-zinc-950/60 border border-zinc-900/60 rounded-xl p-2.5 text-center min-w-[70px]">
+                                  <span className="block text-[8px] font-mono text-yellow-400 uppercase font-black">Eficiencia</span>
+                                  <span className="text-xs font-mono font-black text-yellow-400">{winRate}%</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Split Columns of Subcollections: Wins vs Losses */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                              {/* Wins Subcollection Column */}
+                              <div className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl p-5 sm:p-6 space-y-4">
+                                <div className="flex items-center gap-2 pb-2.5 border-b border-zinc-900">
+                                  <div className="w-5 h-5 rounded bg-green-500/10 flex items-center justify-center text-green-400">
+                                    <ThumbsUp className="w-3 h-3" />
+                                  </div>
+                                  <h6 className="font-mono text-xs font-black text-green-400 uppercase tracking-widest text-left">
+                                    Versus Ganados ({candWinsList.length})
+                                  </h6>
+                                </div>
+
+                                {isLoadingEstadisticas ? (
+                                  <div className="py-6 text-center text-zinc-500 font-mono text-xs animate-pulse">
+                                    Cargando victorias de {activeCand.name}...
+                                  </div>
+                                ) : candWinsList.length === 0 ? (
+                                  <div className="py-8 text-center text-zinc-500 font-sans text-xs bg-[#040405] border border-zinc-900/60 rounded-xl leading-relaxed">
+                                    Esta candidata no ha registrado ninguna victoria en Versus todavía.
+                                  </div>
+                                ) : (
+                                  <div className="space-y-2 max-h-[350px] overflow-y-auto pr-1">
+                                    {candWinsList.map((win) => (
+                                      <div
+                                        key={`win-history-${win.id}`}
+                                        className="flex items-center justify-between p-3 rounded-xl bg-[#040405] border border-zinc-900/80"
+                                      >
+                                        <div className="flex items-center gap-3">
+                                          <img
+                                            src={win.opponentPhoto}
+                                            alt={win.opponentName}
+                                            referrerPolicy="no-referrer"
+                                            className="w-8 h-8 rounded-lg object-cover bg-zinc-950 border border-zinc-800"
+                                            onError={(e) => {
+                                              (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100';
+                                            }}
+                                          />
+                                          <div className="text-left">
+                                            <span className="block text-xs font-bold text-zinc-200 uppercase">{win.opponentName}</span>
+                                            <span className="block text-[8px] text-zinc-500 font-mono">Última victoria: {new Date(win.timestamp).toLocaleDateString()}</span>
+                                          </div>
+                                        </div>
+
+                                        <div className="bg-green-500/10 border border-green-500/20 text-green-400 font-mono text-2xs font-bold px-2 py-1 rounded-lg">
+                                          Ganó {win.count} {win.count === 1 ? 'vez' : 'veces'}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Losses Subcollection Column */}
+                              <div className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl p-5 sm:p-6 space-y-4">
+                                <div className="flex items-center gap-2 pb-2.5 border-b border-zinc-900">
+                                  <div className="w-5 h-5 rounded bg-red-500/10 flex items-center justify-center text-red-400">
+                                    <ThumbsDown className="w-3 h-3" />
+                                  </div>
+                                  <h6 className="font-mono text-xs font-black text-red-400 uppercase tracking-widest text-left">
+                                    Versus Perdidos ({candLossesList.length})
+                                  </h6>
+                                </div>
+
+                                {isLoadingEstadisticas ? (
+                                  <div className="py-6 text-center text-zinc-500 font-mono text-xs animate-pulse">
+                                    Cargando derrotas de {activeCand.name}...
+                                  </div>
+                                ) : candLossesList.length === 0 ? (
+                                  <div className="py-8 text-center text-zinc-500 font-sans text-xs bg-[#040405] border border-zinc-900/60 rounded-xl leading-relaxed">
+                                    Esta candidata no tiene ninguna derrota registrada en Versus.
+                                  </div>
+                                ) : (
+                                  <div className="space-y-2 max-h-[350px] overflow-y-auto pr-1">
+                                    {candLossesList.map((loss) => (
+                                      <div
+                                        key={`loss-history-${loss.id}`}
+                                        className="flex items-center justify-between p-3 rounded-xl bg-[#040405] border border-zinc-900/80"
+                                      >
+                                        <div className="flex items-center gap-3">
+                                          <img
+                                            src={loss.opponentPhoto}
+                                            alt={loss.opponentName}
+                                            referrerPolicy="no-referrer"
+                                            className="w-8 h-8 rounded-lg object-cover bg-zinc-950 border border-zinc-800"
+                                            onError={(e) => {
+                                              (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100';
+                                            }}
+                                          />
+                                          <div className="text-left">
+                                            <span className="block text-xs font-bold text-zinc-200 uppercase">{loss.opponentName}</span>
+                                            <span className="block text-[8px] text-zinc-500 font-mono">Último duelo: {new Date(loss.timestamp).toLocaleDateString()}</span>
+                                          </div>
+                                        </div>
+
+                                        <div className="bg-red-500/10 border border-red-500/20 text-red-400 font-mono text-2xs font-bold px-2 py-1 rounded-lg">
+                                          Perdió {loss.count} {loss.count === 1 ? 'vez' : 'veces'}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </motion.div>
+                  )}
                 </motion.div>
               )}
-
             </AnimatePresence>
 
           </motion.div>

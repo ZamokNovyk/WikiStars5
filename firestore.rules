@@ -69,6 +69,14 @@ service cloud.firestore {
       // Reinado subcollection inside each educational center
       match /reinado/{candidateId} {
         allow read, write: if true;
+
+        match /versus.ganados/{opponentId} {
+          allow read, write: if true;
+        }
+
+        match /versus.perdidos/{opponentId} {
+          allow read, write: if true;
+        }
       }
 
       // Reinado config subcollection inside each educational center

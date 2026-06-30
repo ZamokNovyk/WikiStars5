@@ -44,7 +44,7 @@ async function startServer() {
 
   // Handle favicon.ico explicitly to avoid returning index.html (which confuses browsers)
   app.get("/favicon.ico", (req, res) => {
-    res.sendFile(path.join(process.cwd(), "public", "wikistars_app_icon.svg"));
+    res.redirect("https://firebasestorage.googleapis.com/v0/b/wikistars5-465e1.firebasestorage.app/o/wikistars5logo.png?alt=media&token=026f822e-3b69-4538-b0ef-28dacb65551e");
   });
 
   let vite: any = null;
