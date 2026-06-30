@@ -193,6 +193,52 @@ export default function App() {
   // Campus-specific Navigation & View Modes
   const [activeCampusTab, setActiveCampusTab] = useState<'Wiki' | 'Profesores' | 'Rachas' | 'Reinado'>('Wiki');
   const [showResults, setShowResults] = useState(false);
+
+  // Sharing Modal State
+  const [shareData, setShareData] = useState<{
+    title: string;
+    text: string;
+    url: string;
+    image?: string;
+  } | null>(null);
+
+  const handleShareInstitute = () => {
+    if (!currentSelectedInstitute) return;
+    const url = `${window.location.origin}/campus/${currentSelectedInstitute.id}`;
+    const text = `🏫 ¡Mira el Campus Hub de *${currentSelectedInstitute.name}* en Starryz5! Accede para ver perfiles, noticias, eventos y más: ${url}`;
+    setShareData({
+      title: 'Compartir Campus',
+      text: text,
+      url: url,
+      image: currentSelectedInstitute.perfilPhotoUrl || undefined
+    });
+  };
+
+  const handleShareProfessor = (prof: any) => {
+    if (!prof) return;
+    const url = `${window.location.origin}/perfiles/${prof.id}`;
+    const instName = currentSelectedInstitute?.name || "su instituto";
+    const text = `🌟 ¡Mira el perfil de la estrella docente *${prof.name}* en *${instName}*! Vota por ellos y descubre más en Starryz5: ${url}`;
+    setShareData({
+      title: 'Compartir Perfil de Docente',
+      text: text,
+      url: url,
+      image: currentSelectedInstitute?.perfilPhotoUrl || undefined
+    });
+  };
+
+  const handleShareReinado = () => {
+    if (!currentSelectedInstitute) return;
+    const url = `${window.location.origin}/campus/${currentSelectedInstitute.id}?tab=reinado`;
+    const text = `👑 ¡Vota por tu candidata favorita en el Versus ELO del Reinado de *${currentSelectedInstitute.name}*! Elige quién ganará la corona aquí: ${url}`;
+    setShareData({
+      title: 'Compartir Reinado Versus ELO',
+      text: text,
+      url: url,
+      image: currentSelectedInstitute.perfilPhotoUrl || undefined
+    });
+  };
+
   const [campusViewMode, setCampusViewMode] = useState<'list' | 'grid'>('list'); // Default to list view as shown in the mockup
   const [studentSortOrder, setStudentSortOrder] = useState<'puntos' | 'nombre' | 'estrellas'>('puntos');
   const [showShareToast, setShowShareToast] = useState(false);
@@ -210,6 +256,19 @@ export default function App() {
 
   // Helper to sync app state based on any given path
   const syncStateFromPath = (path: string) => {
+    // Parse query tab parameter if present
+    const urlParams = new URLSearchParams(window.location.search);
+    const tabParam = urlParams.get('tab');
+    if (tabParam === 'reinado' || tabParam === 'Reinado') {
+      setActiveCampusTab('Reinado');
+    } else if (tabParam === 'profesores' || tabParam === 'Profesores') {
+      setActiveCampusTab('Profesores');
+    } else if (tabParam === 'rachas' || tabParam === 'Rachas') {
+      setActiveCampusTab('Rachas');
+    } else if (tabParam === 'wiki' || tabParam === 'Wiki') {
+      setActiveCampusTab('Wiki');
+    }
+
     if (path.startsWith('/user.admi/') || path.startsWith('/user.admin/')) {
       const id = path.split('/')[2];
       setAdminPathId(id || null);
@@ -261,7 +320,7 @@ export default function App() {
   useEffect(() => {
     if (!isUrlRestored) return;
 
-    const currentPath = window.location.pathname;
+    const currentFullPath = window.location.pathname + window.location.search;
     let targetPath = '/';
 
     if (isAdminView) {
@@ -273,13 +332,16 @@ export default function App() {
       targetPath = `/profile/${selectedAlumnoId}`;
     } else if (selectedInstituteId) {
       targetPath = `/campus/${selectedInstituteId}`;
+      if (activeCampusTab && activeCampusTab !== 'Wiki') {
+        targetPath += `?tab=${activeCampusTab.toLowerCase()}`;
+      }
     }
 
     // Only push if the path actually changed to avoid duplicate history states
-    if (currentPath !== targetPath) {
+    if (currentFullPath !== targetPath) {
       window.history.pushState(null, '', targetPath);
     }
-  }, [selectedProfessorId, selectedAlumnoId, selectedInstituteId, isAdminView, adminPathId, currentUser?.userId, isUrlRestored]);
+  }, [selectedProfessorId, selectedAlumnoId, selectedInstituteId, isAdminView, adminPathId, currentUser?.userId, isUrlRestored, activeCampusTab]);
 
   // If we loaded a professor profile via URL, resolve its institute ID from the global perfiles collection
   useEffect(() => {
@@ -300,6 +362,8 @@ export default function App() {
       }
     }
   }, [selectedAlumnoId, selectedInstituteId, alumnos]);
+
+
 
   // Check if current user is an admin by querying "users.admin" collection
   useEffect(() => {
@@ -2646,6 +2710,74 @@ export default function App() {
     return professors.find(p => p.id === selectedProfessorId) || null;
   }, [selectedProfessorId, professors]);
 
+  // Dynamic Open Graph / Meta tags update for WhatsApp/etc sharing
+  useEffect(() => {
+    let title = "Starryz5";
+    let desc = "Plataforma de centros educativos y perfiles.";
+    let imageUrl = "https://firebasestorage.googleapis.com/v0/b/wikistars5-465e1.firebasestorage.app/o/wikistars5logo.png?alt=media&token=026f822e-3b69-4538-b0ef-28dacb65551e"; // default logo
+    let url = window.location.href;
+
+    if (selectedProfessorId && currentSelectedProfessor) {
+      const instName = currentSelectedInstitute?.name || "Instituto";
+      title = `Prof. ${currentSelectedProfessor.name} | ${instName}`;
+      desc = `Mira el perfil de la estrella docente ${currentSelectedProfessor.name} en Starryz5.`;
+      if (currentSelectedInstitute?.perfilPhotoUrl) {
+        imageUrl = currentSelectedInstitute.perfilPhotoUrl;
+      }
+    } else if (selectedAlumnoId && currentSelectedAlumno) {
+      const instName = currentSelectedInstitute?.name || "Instituto";
+      title = `${currentSelectedAlumno.name} | ${instName}`;
+      desc = `Perfil estudiantil de ${currentSelectedAlumno.name} en Starryz5.`;
+      if (currentSelectedInstitute?.perfilPhotoUrl) {
+        imageUrl = currentSelectedInstitute.perfilPhotoUrl;
+      }
+    } else if (selectedInstituteId && currentSelectedInstitute) {
+      if (activeCampusTab === 'Reinado') {
+        title = `👑 Reinado ELO - ${currentSelectedInstitute.name}`;
+        desc = `¡Vota por tu candidata favorita en el Versus ELO de ${currentSelectedInstitute.name}!`;
+        url = `${window.location.origin}/campus/${selectedInstituteId}?tab=reinado`;
+      } else {
+        title = currentSelectedInstitute.name;
+        desc = `Bienvenido al Campus Hub de ${currentSelectedInstitute.name} en Starryz5.`;
+      }
+      if (currentSelectedInstitute.perfilPhotoUrl) {
+        imageUrl = currentSelectedInstitute.perfilPhotoUrl;
+      }
+    }
+
+    // Update Document Title
+    document.title = title;
+
+    // Helper to get or create meta tag
+    const setMetaTag = (propertyOrName: string, content: string, isName = false) => {
+      const attr = isName ? 'name' : 'property';
+      let element = document.head.querySelector(`meta[${attr}="${propertyOrName}"]`);
+      if (!element) {
+        element = document.createElement('meta');
+        element.setAttribute(attr, propertyOrName);
+        document.head.appendChild(element);
+      }
+      element.setAttribute('content', content);
+    };
+
+    setMetaTag('og:title', title);
+    setMetaTag('og:description', desc);
+    setMetaTag('og:image', imageUrl);
+    setMetaTag('og:url', url);
+    setMetaTag('twitter:title', title, true);
+    setMetaTag('twitter:description', desc, true);
+    setMetaTag('twitter:image', imageUrl, true);
+    setMetaTag('twitter:card', 'summary_large_image', true);
+  }, [
+    selectedInstituteId,
+    currentSelectedInstitute,
+    selectedProfessorId,
+    currentSelectedProfessor,
+    selectedAlumnoId,
+    currentSelectedAlumno,
+    activeCampusTab
+  ]);
+
   const currentAlumnoComments = useMemo(() => {
     if (!selectedAlumnoId) return [];
     return comments.filter(c => c.alumnoId === selectedAlumnoId);
@@ -3260,11 +3392,7 @@ export default function App() {
                 {/* Float elements right */}
                 <div className="absolute top-4 right-4 z-20 flex gap-2">
                   <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(window.location.href);
-                      setShowShareToast(true);
-                      setTimeout(() => setShowShareToast(false), 2000);
-                    }}
+                    onClick={handleShareInstitute}
                     className="p-2.5 rounded-full bg-zinc-950/80 hover:bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-400 hover:text-yellow-400 transition-all shadow-lg active:scale-95 cursor-pointer"
                     title="Compartir campus"
                   >
@@ -4332,11 +4460,22 @@ export default function App() {
                 >
                   {/* ELO Matchup Versus Arena */}
                   <div className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl p-6 sm:p-8 space-y-6">
-                    <div className="text-center space-y-1">
-                      <span className="text-[10px] font-mono uppercase tracking-widest text-yellow-400 font-black">ENFRENTAMIENTO DIRECTO</span>
-                      <h4 className="text-lg sm:text-xl font-display font-black text-white uppercase tracking-wide">
-                        ¿Quién es tu favorita?
-                      </h4>
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-zinc-900 pb-4 gap-4">
+                      <div className="text-left space-y-1">
+                        <span className="text-[10px] font-mono uppercase tracking-widest text-yellow-400 font-black">ENFRENTAMIENTO DIRECTO</span>
+                        <h4 className="text-lg sm:text-xl font-display font-black text-white uppercase tracking-wide">
+                          ¿Quién es tu favorita?
+                        </h4>
+                      </div>
+                      
+                      {/* Compartir Versus Button */}
+                      <button
+                        onClick={handleShareReinado}
+                        className="flex items-center justify-center gap-2 bg-zinc-950 hover:bg-zinc-900 text-zinc-300 hover:text-white border border-zinc-800 hover:border-zinc-700 px-4 py-2.5 rounded-xl text-xs font-mono transition-all duration-200 cursor-pointer active:scale-95 self-start sm:self-center"
+                      >
+                        <Share2 className="w-3.5 h-3.5 text-yellow-400" />
+                        <span>COMPARTIR VERSUS</span>
+                      </button>
                     </div>
 
                     {reinadoCandidates.length < 2 ? (
@@ -5141,6 +5280,17 @@ export default function App() {
               {/* Background gradient/cover */}
               <div className="h-32 bg-gradient-to-r from-zinc-950 via-[#0e0e10] to-zinc-950 relative border-b border-zinc-900/60 overflow-hidden">
                 <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(250,204,21,0.04)_0%,transparent_70%)] animate-pulse" />
+                
+                {/* Floating Share Button */}
+                <div className="absolute top-4 right-4 z-20">
+                  <button
+                    onClick={() => handleShareProfessor(currentSelectedProfessor)}
+                    className="p-2.5 rounded-full bg-zinc-950/80 hover:bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-400 hover:text-yellow-400 transition-all shadow-lg active:scale-95 cursor-pointer"
+                    title="Compartir perfil de docente"
+                  >
+                    <Share2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
 
               {/* Avatar section */}
@@ -6116,6 +6266,88 @@ export default function App() {
 
         </div>
       </footer>
+
+      {/* --- MODAL DE COMPARTIR (WHATSAPP & CLIPBOARD) --- */}
+      <AnimatePresence>
+        {shareData && (
+          <div id="share-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            {/* Backdrop */}
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/90 backdrop-blur-sm z-40"
+              onClick={() => setShareData(null)}
+            />
+            {/* Box */}
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-zinc-950 border border-zinc-900 rounded-3xl p-6 sm:p-8 max-w-sm w-full relative z-50 space-y-6 shadow-2xl text-center"
+            >
+              <button 
+                onClick={() => setShareData(null)}
+                className="absolute top-4 right-4 text-zinc-500 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="space-y-2">
+                <div className="mx-auto w-12 h-12 bg-yellow-400/10 border border-yellow-400/20 rounded-full flex items-center justify-center text-yellow-400 mb-2">
+                  <Share2 className="w-6 h-6" />
+                </div>
+                <h3 className="text-lg font-display font-black text-white uppercase tracking-tight">
+                  {shareData.title}
+                </h3>
+                <p className="text-xs text-zinc-400 font-sans font-medium">
+                  Selecciona una opción para compartir o copiar el enlace directo.
+                </p>
+              </div>
+
+              {/* Institution Profile Photo Preview if available */}
+              {shareData.image && (
+                <div className="mx-auto w-20 h-20 rounded-2xl overflow-hidden border border-zinc-800 bg-zinc-900 p-1 flex items-center justify-center">
+                  <img 
+                    src={shareData.image} 
+                    alt="Campus Logo" 
+                    className="w-full h-full object-cover rounded-xl"
+                    referrerPolicy="no-referrer"
+                  />
+                </div>
+              )}
+
+              <div className="space-y-3 pt-2">
+                {/* WhatsApp Share Button */}
+                <a
+                  href={`https://api.whatsapp.com/send?text=${encodeURIComponent(shareData.text)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full bg-[#25D366] hover:bg-[#20ba5a] text-black font-sans font-black text-sm py-3.5 px-6 rounded-xl flex items-center justify-center gap-2.5 transition-all duration-200 cursor-pointer shadow-lg active:scale-[0.98] uppercase tracking-wide decoration-none"
+                >
+                  <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
+                    <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946C.06 5.348 5.397.01 12.008.01c3.202.001 6.212 1.246 8.477 3.513 2.266 2.268 3.507 5.28 3.505 8.484-.004 6.657-5.34 11.997-11.953 11.997-2.005-.001-3.973-.502-5.724-1.455L0 24zm6.59-4.846c1.6.95 3.188 1.449 4.825 1.451 5.436 0 9.86-4.37 9.864-9.799.002-2.63-1.023-5.101-2.885-6.965C16.528 1.977 14.07 1.01 11.451 1.01 6.012 1.01 1.593 5.378 1.59 10.808c0 1.683.447 3.325 1.298 4.77l-.993 3.626 3.75-.983zM15.786 12.93c-.272-.137-1.614-.797-1.863-.888-.249-.09-.43-.137-.61.137-.18.272-.696.888-.853 1.07-.158.18-.315.204-.587.067-.272-.137-1.15-.424-2.19-1.353-.809-.721-1.355-1.614-1.514-1.886-.158-.271-.017-.417.119-.553.123-.122.272-.318.408-.477.136-.159.18-.272.271-.453.092-.181.045-.34-.022-.477-.068-.137-.61-1.472-.836-2.015-.22-.53-.44-.457-.61-.466-.158-.008-.339-.01-.52-.01-.18 0-.474.067-.723.34-.249.271-.95.93-.95 2.27 0 1.34.974 2.633 1.11 2.814.135.18 1.916 2.926 4.641 4.103.648.28 1.155.447 1.55.573.65.207 1.24.177 1.707.108.52-.078 1.614-.66 1.84-1.297.227-.637.227-1.184.159-1.297-.069-.113-.254-.18-.526-.317z" />
+                  </svg>
+                  <span>Compartir en WhatsApp</span>
+                </a>
+
+                {/* Copy Direct Link Button */}
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(shareData.url);
+                    setShowShareToast(true);
+                    setShareData(null);
+                    setTimeout(() => setShowShareToast(false), 2000);
+                  }}
+                  className="w-full bg-zinc-900 hover:bg-zinc-800 text-white font-sans font-black text-sm py-3.5 px-6 rounded-xl flex items-center justify-center gap-2.5 transition-all duration-200 cursor-pointer border border-zinc-800 uppercase tracking-wide active:scale-[0.98]"
+                >
+                  <span>🔗 Copiar Enlace</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* --- MODAL 2: UNIRSE (REGISTRO ESTUDIANTE) --- */}
       <AnimatePresence>
