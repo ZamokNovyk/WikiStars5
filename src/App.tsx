@@ -54,7 +54,8 @@ import {
   Twitter,
   Compass,
   Navigation,
-  Globe
+  Globe,
+  Clock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Institute, Alumno, AlumnoComment } from './types';
@@ -572,6 +573,17 @@ export default function App() {
   const [newCandidatePhoto, setNewCandidatePhoto] = useState('');
   const [newCandidateSpecialty, setNewCandidateSpecialty] = useState('');
   const [isSubmittingCandidate, setIsSubmittingCandidate] = useState(false);
+  const [reinadoConfig, setReinadoConfig] = useState<{ deadlineDate: string | null } | null>(null);
+  const [votedPairs, setVotedPairs] = useState<string[]>([]);
+  const [now, setNow] = useState<number>(Date.now());
+
+  // Ticker for ELO countdown real-time display
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setNow(Date.now());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Notification Banner
   const [bannerNotice, setBannerNotice] = useState<string | null>(null);
@@ -676,25 +688,12 @@ export default function App() {
       console.warn("Could not fetch database stats:", error);
     });
 
-    const unsubscribeReinado = onSnapshot(collection(db, 'reinado_candidates'), (snapshot) => {
-      const list: any[] = [];
-      snapshot.forEach((snapDoc) => {
-        list.push({ id: snapDoc.id, ...snapDoc.data() });
-      });
-      // Sort descending by ELO rating (default to 1000 if not set)
-      list.sort((a, b) => (b.elo ?? 1000) - (a.elo ?? 1000));
-      setReinadoCandidates(list);
-    }, (error) => {
-      console.warn("Could not fetch reinado candidates:", error);
-    });
-
     return () => {
       unsubscribeAlumnos();
       unsubscribeComments();
       unsubscribeInstitutes();
       unsubscribePerfiles();
       unsubscribeStats();
-      unsubscribeReinado();
     };
   }, []);
 
@@ -706,25 +705,49 @@ export default function App() {
     }
   }, [currentUser]);
 
-  // Synchronize current left and right candidate IDs with available list
+  // Synchronize current left and right candidate IDs with available list, respecting unvoted pairs
   useEffect(() => {
     if (reinadoCandidates.length >= 2) {
       const existsLeft = reinadoCandidates.some(c => c.id === currentLeftId);
       const existsRight = reinadoCandidates.some(c => c.id === currentRightId);
-      if (!currentLeftId || !currentRightId || !existsLeft || !existsRight || currentLeftId === currentRightId) {
-        const leftIdx = Math.floor(Math.random() * reinadoCandidates.length);
-        let rightIdx = Math.floor(Math.random() * reinadoCandidates.length);
-        while (rightIdx === leftIdx) {
-          rightIdx = Math.floor(Math.random() * reinadoCandidates.length);
+      const currentPairKey = (currentLeftId && currentRightId)
+        ? (currentLeftId < currentRightId ? `${currentLeftId}_${currentRightId}` : `${currentRightId}_${currentLeftId}`)
+        : null;
+
+      const isCurrentValidAndUnvoted = currentLeftId && currentRightId && existsLeft && existsRight && currentLeftId !== currentRightId && (!currentPairKey || !votedPairs.includes(currentPairKey));
+
+      if (!isCurrentValidAndUnvoted) {
+        // Calculate all unique pairs
+        const allPairs: string[] = [];
+        for (let i = 0; i < reinadoCandidates.length; i++) {
+          for (let j = i + 1; j < reinadoCandidates.length; j++) {
+            const idA = reinadoCandidates[i].id;
+            const idB = reinadoCandidates[j].id;
+            allPairs.push(idA < idB ? `${idA}_${idB}` : `${idB}_${idA}`);
+          }
         }
-        setCurrentLeftId(reinadoCandidates[leftIdx].id);
-        setCurrentRightId(reinadoCandidates[rightIdx].id);
+        const unvoted = allPairs.filter(p => !votedPairs.includes(p));
+
+        if (unvoted.length > 0) {
+          const randomPair = unvoted[Math.floor(Math.random() * unvoted.length)];
+          const [idA, idB] = randomPair.split('_');
+          if (Math.random() > 0.5) {
+            setCurrentLeftId(idA);
+            setCurrentRightId(idB);
+          } else {
+            setCurrentLeftId(idB);
+            setCurrentRightId(idA);
+          }
+        } else {
+          setCurrentLeftId(null);
+          setCurrentRightId(null);
+        }
       }
     } else {
       setCurrentLeftId(null);
       setCurrentRightId(null);
     }
-  }, [reinadoCandidates, currentLeftId, currentRightId]);
+  }, [reinadoCandidates, currentLeftId, currentRightId, votedPairs]);
 
   const currentLeftCandidate = useMemo(() => {
     return reinadoCandidates.find(c => c.id === currentLeftId) || null;
@@ -733,6 +756,33 @@ export default function App() {
   const currentRightCandidate = useMemo(() => {
     return reinadoCandidates.find(c => c.id === currentRightId) || null;
   }, [reinadoCandidates, currentRightId]);
+
+  const isExpired = useMemo(() => {
+    if (!reinadoConfig?.deadlineDate) return false;
+    return now > new Date(reinadoConfig.deadlineDate).getTime();
+  }, [reinadoConfig?.deadlineDate, now]);
+
+  const timeRemaining = useMemo(() => {
+    if (!reinadoConfig?.deadlineDate) return null;
+    const diff = new Date(reinadoConfig.deadlineDate).getTime() - now;
+    if (diff <= 0) return null;
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
+    const minutes = Math.floor((diff / (1000 * 60)) % 60);
+    const seconds = Math.floor((diff / 1000) % 60);
+    return { days, hours, minutes, seconds };
+  }, [reinadoConfig?.deadlineDate, now]);
+
+  const totalPossibleMatchups = useMemo(() => {
+    const N = reinadoCandidates.length;
+    if (N < 2) return 0;
+    return (N * (N - 1)) / 2;
+  }, [reinadoCandidates]);
+
+  const allMatchupsVoted = useMemo(() => {
+    if (reinadoCandidates.length < 2) return false;
+    return votedPairs.length >= totalPossibleMatchups;
+  }, [votedPairs, totalPossibleMatchups, reinadoCandidates]);
 
   // Load professors for active institute in real-time
   useEffect(() => {
@@ -750,6 +800,48 @@ export default function App() {
       setProfessors(list);
     }, (error) => {
       console.warn("Could not fetch professors:", error);
+    });
+
+    return () => unsubscribe();
+  }, [selectedInstituteId]);
+
+  // Load reinado candidates for active institute in real-time
+  useEffect(() => {
+    if (!selectedInstituteId) {
+      setReinadoCandidates([]);
+      return;
+    }
+
+    const unsubscribe = onSnapshot(collection(db, 'centros.educativos', selectedInstituteId, 'reinado'), (snapshot) => {
+      const list: any[] = [];
+      snapshot.forEach((snapDoc) => {
+        list.push({ id: snapDoc.id, ...snapDoc.data() });
+      });
+      // Sort descending by ELO rating (default to 1000 if not set)
+      list.sort((a, b) => (b.elo ?? 1000) - (a.elo ?? 1000));
+      setReinadoCandidates(list);
+    }, (error) => {
+      console.warn("Could not fetch reinado candidates:", error);
+    });
+
+    return () => unsubscribe();
+  }, [selectedInstituteId]);
+
+  // Load reinado config for active institute in real-time
+  useEffect(() => {
+    if (!selectedInstituteId) {
+      setReinadoConfig(null);
+      return;
+    }
+
+    const unsubscribe = onSnapshot(doc(db, 'centros.educativos', selectedInstituteId, 'reinado_config', 'settings'), (snap) => {
+      if (snap.exists()) {
+        setReinadoConfig(snap.data() as { deadlineDate: string | null });
+      } else {
+        setReinadoConfig({ deadlineDate: null });
+      }
+    }, (error) => {
+      console.warn("Could not fetch reinado config:", error);
     });
 
     return () => unsubscribe();
@@ -1970,6 +2062,7 @@ export default function App() {
 
   // Vote in the Reinado ELO Versus
   const handleVoteCandidate = async (winnerId: string, loserId: string) => {
+    if (!selectedInstituteId) return;
     const winner = reinadoCandidates.find(c => c.id === winnerId);
     const loser = reinadoCandidates.find(c => c.id === loserId);
     if (!winner || !loser) return;
@@ -1985,48 +2078,67 @@ export default function App() {
     const newRA = Math.round(rA + K * (1 - eA));
     const newRB = Math.round(rB + K * (0 - eB));
 
+    // Simulate new leaderboard to check if someone became #1 and displaced another
+    const simulatedCandidates = reinadoCandidates.map(c => {
+      if (c.id === winnerId) {
+        return { ...c, elo: newRA };
+      }
+      if (c.id === loserId) {
+        return { ...c, elo: newRB };
+      }
+      return c;
+    });
+    simulatedCandidates.sort((a, b) => (b.elo ?? 1000) - (a.elo ?? 1000));
+    const previousLeaderId = reinadoCandidates[0]?.id || null;
+    const newLeaderId = simulatedCandidates[0]?.id || null;
+
+    let winnerCrownsUpdate = winner.crowns ?? 0;
+
+    if (newLeaderId && previousLeaderId && newLeaderId !== previousLeaderId) {
+      if (newLeaderId === winnerId) {
+        winnerCrownsUpdate = (winner.crowns ?? 0) + 1;
+        triggerNotice(`👑 ¡${winner.name} ha tomado el trono y gana una corona!`);
+      } else {
+        const otherLeader = reinadoCandidates.find(c => c.id === newLeaderId);
+        if (otherLeader) {
+          await setDoc(doc(db, 'centros.educativos', selectedInstituteId, 'reinado', newLeaderId), {
+            ...otherLeader,
+            crowns: (otherLeader.crowns ?? 0) + 1
+          }, { merge: true });
+          triggerNotice(`👑 ¡${otherLeader.name} ha tomado el trono y gana una corona!`);
+        }
+      }
+    } else if (newLeaderId && !previousLeaderId) {
+      if (newLeaderId === winnerId) {
+        winnerCrownsUpdate = (winner.crowns ?? 0) + 1;
+      }
+    }
+
     try {
-      await setDoc(doc(db, 'reinado_candidates', winnerId), {
+      await setDoc(doc(db, 'centros.educativos', selectedInstituteId, 'reinado', winnerId), {
         ...winner,
         elo: newRA,
-        votes: (winner.votes ?? 0) + 1
+        votes: (winner.votes ?? 0) + 1,
+        crowns: winnerCrownsUpdate
       }, { merge: true });
 
-      await setDoc(doc(db, 'reinado_candidates', loserId), {
+      await setDoc(doc(db, 'centros.educativos', selectedInstituteId, 'reinado', loserId), {
         ...loser,
         elo: newRB
       }, { merge: true });
 
-      // Choose next random matchup
-      if (reinadoCandidates.length >= 2) {
-        let nextLeft = reinadoCandidates[Math.floor(Math.random() * reinadoCandidates.length)];
-        let nextRight = reinadoCandidates[Math.floor(Math.random() * reinadoCandidates.length)];
-        
-        let attempts = 0;
-        while ((nextLeft.id === nextRight.id || (nextLeft.id === winnerId && nextRight.id === loserId) || (nextLeft.id === loserId && nextRight.id === winnerId)) && attempts < 20) {
-          nextLeft = reinadoCandidates[Math.floor(Math.random() * reinadoCandidates.length)];
-          nextRight = reinadoCandidates[Math.floor(Math.random() * reinadoCandidates.length)];
-          attempts++;
-        }
-        if (nextLeft.id === nextRight.id) {
-          while (nextLeft.id === nextRight.id) {
-            nextRight = reinadoCandidates[Math.floor(Math.random() * reinadoCandidates.length)];
-          }
-        }
-        setCurrentLeftId(nextLeft.id);
-        setCurrentRightId(nextRight.id);
-      }
-      
-      triggerNotice('¡Voto de favoritismo registrado!');
+      // Add to voted pairs list
+      const votedPairKey = winnerId < loserId ? `${winnerId}_${loserId}` : `${loserId}_${winnerId}`;
+      setVotedPairs(prev => [...prev, votedPairKey]);
     } catch (error) {
-      console.error("Error updating ELO ratings:", error);
+      console.error("Error voting candidate:", error);
     }
   };
 
   // Admin registers a new Reinado candidate
   const handleRegisterCandidate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newCandidateName.trim() || !newCandidatePhoto.trim()) return;
+    if (!selectedInstituteId || !newCandidateName.trim() || !newCandidatePhoto.trim()) return;
 
     setIsSubmittingCandidate(true);
     try {
@@ -2039,7 +2151,7 @@ export default function App() {
         votes: 0,
         createdAt: new Date().toISOString()
       };
-      await setDoc(doc(db, 'reinado_candidates', id), newCand);
+      await setDoc(doc(db, 'centros.educativos', selectedInstituteId, 'reinado', id), newCand);
       setNewCandidateName('');
       setNewCandidatePhoto('');
       setNewCandidateSpecialty('');
@@ -2054,9 +2166,10 @@ export default function App() {
 
   // Admin deletes a Reinado candidate
   const handleDeleteCandidate = async (candId: string) => {
+    if (!selectedInstituteId) return;
     if (!window.confirm('¿Estás seguro de que quieres eliminar esta candidata?')) return;
     try {
-      await deleteDoc(doc(db, 'reinado_candidates', candId));
+      await deleteDoc(doc(db, 'centros.educativos', selectedInstituteId, 'reinado', candId));
       triggerNotice('Candidata eliminada correctamente.');
     } catch (error) {
       console.error("Error deleting candidate:", error);
@@ -4217,20 +4330,6 @@ export default function App() {
                   exit={{ opacity: 0 }}
                   className="space-y-8"
                 >
-                  {/* Hero Title Header */}
-                  <div className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl p-6 sm:p-8 text-center space-y-3 relative overflow-hidden shadow-2xl">
-                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-1 bg-gradient-to-r from-transparent via-yellow-400 to-transparent" />
-                    <div className="inline-flex items-center justify-center p-3 rounded-full bg-yellow-400/10 border border-yellow-400/20 mb-1">
-                      <Crown className="w-8 h-8 text-yellow-400 animate-bounce" />
-                    </div>
-                    <h3 className="font-display font-black text-xl sm:text-2xl text-white uppercase tracking-widest">
-                      VERSUS REINADO: SISTEMA ELO
-                    </h3>
-                    <p className="text-xs text-zinc-400 max-w-lg mx-auto leading-relaxed">
-                      Elige a tu favorita en cada emparejamiento aleatorio para actualizar su puntaje ELO global en tiempo real. ¡La tabla de posiciones se actualiza de manera interactiva!
-                    </p>
-                  </div>
-
                   {/* ELO Matchup Versus Arena */}
                   <div className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl p-6 sm:p-8 space-y-6">
                     <div className="text-center space-y-1">
@@ -4254,106 +4353,288 @@ export default function App() {
                           </button>
                         )}
                       </div>
-                    ) : (
-                      <div className="grid grid-cols-1 md:grid-cols-7 gap-6 items-center max-w-3xl mx-auto pt-2">
-                        {/* Left Candidate Card */}
-                        {currentLeftCandidate && (
-                          <motion.div
-                            whileHover={{ scale: 1.02 }}
-                            whileTap={{ scale: 0.98 }}
-                            className="md:col-span-3 bg-[#050506] border border-zinc-900 rounded-2xl overflow-hidden cursor-pointer hover:border-yellow-400/30 transition-all duration-300 shadow-xl flex flex-col group"
-                            onClick={() => handleVoteCandidate(currentLeftCandidate.id, currentRightCandidate?.id ?? '')}
-                          >
-                            <div className="aspect-[4/5] relative bg-zinc-950 overflow-hidden">
+                    ) : isExpired ? (
+                      /* PODIUM DISPLAY WHEN VOTING IS EXPIRED */
+                      <div className="space-y-6 text-center py-4">
+                        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-500/10 border border-red-500/20 text-red-400 font-mono text-[10px] uppercase font-black tracking-wider animate-pulse">
+                          <Lock className="w-3 h-3" />
+                          Votación Finalizada
+                        </div>
+                        <h5 className="text-xl font-display font-black text-white uppercase tracking-wider">
+                          Podio de Honor 👑
+                        </h5>
+                        <p className="text-xs text-zinc-400 max-w-md mx-auto leading-relaxed">
+                          La fecha límite ha concluido. Ya no es posible registrar votos y se presenta oficialmente a las ganadoras de este reinado.
+                        </p>
+
+                        {/* Podium Row */}
+                        <div className="grid grid-cols-3 gap-3 sm:gap-6 max-w-2xl mx-auto pt-8 items-end">
+                          {/* 2nd Place */}
+                          {reinadoCandidates[1] ? (
+                            <motion.div
+                              initial={{ opacity: 0, y: 20 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ delay: 0.2 }}
+                              className="bg-[#050506]/80 border border-zinc-900 rounded-xl p-3 sm:p-5 text-center flex flex-col items-center space-y-2 h-[85%] relative"
+                            >
+                              <div className="absolute -top-3 left-1/2 -translate-x-1/2 w-6 h-6 rounded-full bg-zinc-350 text-black font-mono font-black text-xs flex items-center justify-center border border-black font-sans shadow-lg">
+                                2
+                              </div>
                               <img
-                                src={currentLeftCandidate.photoUrl}
-                                alt={currentLeftCandidate.name}
+                                src={reinadoCandidates[1].photoUrl}
+                                alt={reinadoCandidates[1].name}
                                 referrerPolicy="no-referrer"
-                                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                                className="w-12 h-12 sm:w-16 sm:h-16 rounded-full object-cover border-2 border-zinc-300 bg-zinc-950"
                                 onError={(e) => {
                                   (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=300';
                                 }}
                               />
-                              <div className="absolute inset-0 bg-gradient-to-t from-black via-black/10 to-transparent opacity-60" />
-                              <div className="absolute bottom-4 left-4 right-4 text-left">
-                                <span className="text-[10px] font-mono font-black bg-yellow-400 text-black px-2 py-0.5 rounded uppercase tracking-wider">
-                                  Opción A
-                                </span>
+                              <div className="min-w-0 w-full">
+                                <h6 className="font-sans font-bold text-[10px] sm:text-xs text-white uppercase line-clamp-1">{reinadoCandidates[1].name}</h6>
+                                <p className="text-[7px] sm:text-[9px] text-zinc-400 truncate uppercase tracking-wider">{reinadoCandidates[1].specialty}</p>
                               </div>
-                            </div>
-                            <div className="p-4 text-center space-y-1">
-                              <h5 className="font-sans font-bold text-sm text-white uppercase group-hover:text-yellow-400 transition-colors">
-                                {currentLeftCandidate.name}
-                              </h5>
-                              {currentLeftCandidate.specialty && (
-                                <p className="text-[10px] text-yellow-400 font-sans font-semibold uppercase tracking-wider">
-                                  {currentLeftCandidate.specialty}
-                                </p>
+                              <div className="bg-zinc-900 px-2 py-0.5 rounded text-[8px] sm:text-[9px] font-mono text-zinc-300">
+                                {reinadoCandidates[1].elo ?? 1000} pts
+                              </div>
+                              {reinadoCandidates[1].crowns > 0 && (
+                                <div className="text-[9px] sm:text-[10px] text-yellow-400 font-mono font-bold flex items-center gap-0.5 justify-center">
+                                  👑 {reinadoCandidates[1].crowns}
+                                </div>
                               )}
-                              <p className="text-[11px] font-mono text-zinc-500">
-                                ELO: <span className="text-yellow-400 font-bold">{currentLeftCandidate.elo ?? 1000}</span>
-                              </p>
-                              <div className="pt-2">
-                                <span className="inline-block w-full bg-zinc-900 hover:bg-yellow-400/10 border border-zinc-800 hover:border-yellow-400/30 text-white group-hover:bg-yellow-400 group-hover:text-black font-mono text-[10px] font-black py-2 rounded-lg uppercase tracking-wider transition-all duration-300">
-                                  Votar por Ella 👑
-                                </span>
-                              </div>
-                            </div>
-                          </motion.div>
-                        )}
+                            </motion.div>
+                          ) : (
+                            <div className="h-10" />
+                          )}
 
-                        {/* VS Divider */}
-                        <div className="md:col-span-1 flex flex-col items-center justify-center">
-                          <div className="w-12 h-12 rounded-full bg-yellow-400 text-black font-mono font-black text-sm flex items-center justify-center shadow-[0_0_20px_rgba(250,204,21,0.3)] border-2 border-black animate-pulse z-10">
-                            VS
+                          {/* 1st Place */}
+                          {reinadoCandidates[0] ? (
+                            <motion.div
+                              initial={{ opacity: 0, y: 20 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              className="bg-gradient-to-b from-yellow-400/10 to-[#050506]/80 border-2 border-yellow-400 rounded-2xl p-4 sm:p-6 text-center flex flex-col items-center space-y-3 relative shadow-[0_0_30px_rgba(250,204,21,0.15)] h-full"
+                            >
+                              <div className="absolute -top-4 left-1/2 -translate-x-1/2 w-8 h-8 rounded-full bg-yellow-400 text-black font-mono font-black text-sm flex items-center justify-center border-2 border-black animate-bounce shadow-xl">
+                                1
+                              </div>
+                              <Crown className="w-5 h-5 text-yellow-400 absolute top-2 right-2 animate-pulse hidden sm:block" />
+                              <img
+                                src={reinadoCandidates[0].photoUrl}
+                                alt={reinadoCandidates[0].name}
+                                referrerPolicy="no-referrer"
+                                className="w-16 h-16 sm:w-24 sm:h-24 rounded-full object-cover border-4 border-yellow-400 bg-zinc-950 shadow-2xl"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=300';
+                                }}
+                              />
+                              <div className="min-w-0 w-full">
+                                <h6 className="font-sans font-black text-xs sm:text-sm text-yellow-400 uppercase line-clamp-1">{reinadoCandidates[0].name}</h6>
+                                <p className="text-[8px] sm:text-[10px] text-zinc-350 truncate font-semibold uppercase tracking-wider">{reinadoCandidates[0].specialty}</p>
+                              </div>
+                              <div className="bg-yellow-400 text-black font-mono font-black px-2.5 sm:px-4 py-1 rounded-full text-[9px] sm:text-[10px] uppercase tracking-wider shadow-md">
+                                {reinadoCandidates[0].elo ?? 1000} PTS
+                              </div>
+                              <div className="text-[9px] sm:text-[10px] text-yellow-350 font-mono font-bold flex items-center gap-1 justify-center bg-yellow-400/10 px-2 py-0.5 rounded border border-yellow-400/20">
+                                👑 {reinadoCandidates[0].crowns ?? 0} { (reinadoCandidates[0].crowns ?? 0) === 1 ? 'Corona' : 'Coronas' }
+                              </div>
+                            </motion.div>
+                          ) : (
+                            <div className="h-10" />
+                          )}
+
+                          {/* 3rd Place */}
+                          {reinadoCandidates[2] ? (
+                            <motion.div
+                              initial={{ opacity: 0, y: 20 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ delay: 0.4 }}
+                              className="bg-[#050506]/80 border border-zinc-900 rounded-xl p-3 sm:p-5 text-center flex flex-col items-center space-y-2 h-[80%] relative"
+                            >
+                              <div className="absolute -top-3 left-1/2 -translate-x-1/2 w-6 h-6 rounded-full bg-amber-700 text-white font-mono font-black text-xs flex items-center justify-center border border-black shadow-lg">
+                                3
+                              </div>
+                              <img
+                                src={reinadoCandidates[2].photoUrl}
+                                alt={reinadoCandidates[2].name}
+                                referrerPolicy="no-referrer"
+                                className="w-12 h-12 sm:w-16 sm:h-16 rounded-full object-cover border-2 border-amber-700 bg-zinc-950"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=300';
+                                }}
+                              />
+                              <div className="min-w-0 w-full">
+                                <h6 className="font-sans font-bold text-[10px] sm:text-xs text-white uppercase line-clamp-1">{reinadoCandidates[2].name}</h6>
+                                <p className="text-[7px] sm:text-[9px] text-zinc-400 truncate uppercase tracking-wider">{reinadoCandidates[2].specialty}</p>
+                              </div>
+                              <div className="bg-zinc-900 px-2 py-0.5 rounded text-[8px] sm:text-[9px] font-mono text-zinc-300">
+                                {reinadoCandidates[2].elo ?? 1000} pts
+                              </div>
+                              {reinadoCandidates[2].crowns > 0 && (
+                                <div className="text-[9px] sm:text-[10px] text-yellow-400 font-mono font-bold flex items-center gap-0.5 justify-center">
+                                  👑 {reinadoCandidates[2].crowns}
+                                </div>
+                              )}
+                            </motion.div>
+                          ) : (
+                            <div className="h-10" />
+                          )}
+                        </div>
+                      </div>
+                    ) : allMatchupsVoted ? (
+                      /* ALL MATCHUPS VOTED SESSION SCREEN */
+                      <div className="bg-[#0e0e10]/80 border border-zinc-900 rounded-2xl p-8 text-center space-y-4 max-w-md mx-auto">
+                        <div className="w-12 h-12 rounded-full bg-yellow-400/10 border border-yellow-400/20 flex items-center justify-center mx-auto text-yellow-400">
+                          <CheckCircle2 className="w-6 h-6 animate-pulse" />
+                        </div>
+                        <div className="space-y-1">
+                          <h5 className="font-display font-black text-white text-base uppercase tracking-wide">¡Enfrentamientos Completados!</h5>
+                          <p className="text-xs text-zinc-400 leading-relaxed">
+                            Has completado todos los emparejamientos posibles de esta sesión. Puedes reiniciar la votación para seguir participando.
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => {
+                            setVotedPairs([]);
+                            triggerNotice("Sesión de Versus reiniciada. ¡A votar de nuevo! 👑");
+                          }}
+                          className="bg-yellow-400 hover:bg-yellow-350 text-black font-mono font-black text-xs px-5 py-2.5 rounded-lg uppercase tracking-wider transition-all cursor-pointer inline-flex items-center gap-1.5"
+                        >
+                          Volver a Votar 👑
+                        </button>
+                      </div>
+                    ) : (
+                      /* REGULAR VERSUS MATCHUP SCREEN */
+                      <div className="space-y-6">
+                        <div className="grid grid-cols-7 gap-2 sm:gap-6 items-center max-w-3xl mx-auto pt-2">
+                          {/* Left Candidate Card */}
+                          {currentLeftCandidate && (
+                            <motion.div
+                              whileHover={{ scale: 1.02 }}
+                              whileTap={{ scale: 0.98 }}
+                              className="col-span-3 bg-[#050506] border border-zinc-900 rounded-xl sm:rounded-2xl overflow-hidden cursor-pointer hover:border-yellow-400/30 transition-all duration-300 shadow-xl flex flex-col group text-left"
+                              onClick={() => handleVoteCandidate(currentLeftCandidate.id, currentRightCandidate?.id ?? '')}
+                            >
+                              <div className="aspect-[4/5] relative bg-zinc-950 overflow-hidden">
+                                <img
+                                  src={currentLeftCandidate.photoUrl}
+                                  alt={currentLeftCandidate.name}
+                                  referrerPolicy="no-referrer"
+                                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                                  onError={(e) => {
+                                    (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=300';
+                                  }}
+                                />
+                                <div className="absolute inset-0 bg-gradient-to-t from-black via-black/10 to-transparent opacity-60" />
+                                <div className="absolute bottom-2 sm:bottom-4 left-2 sm:left-4 right-2 sm:right-4 text-left">
+                                  <span className="text-[8px] sm:text-[10px] font-mono font-black bg-yellow-400 text-black px-1.5 sm:px-2 py-0.5 rounded uppercase tracking-wider">
+                                    Opción A
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="p-2 sm:p-4 text-center space-y-1">
+                                <h5 className="font-sans font-bold text-xs sm:text-sm text-white uppercase group-hover:text-yellow-400 transition-colors line-clamp-1">
+                                  {currentLeftCandidate.name}
+                                </h5>
+                                {currentLeftCandidate.specialty && (
+                                  <p className="text-[8px] sm:text-[10px] text-yellow-400 font-sans font-semibold uppercase tracking-wider truncate">
+                                    {currentLeftCandidate.specialty}
+                                  </p>
+                                )}
+                                <p className="text-[9px] sm:text-[11px] font-mono text-zinc-500">
+                                  ELO: <span className="text-yellow-400 font-bold">{currentLeftCandidate.elo ?? 1000}</span>
+                                </p>
+                                {currentLeftCandidate.crowns > 0 && (
+                                  <div className="text-[9px] text-yellow-400 font-mono font-bold flex items-center justify-center gap-0.5">
+                                    👑 {currentLeftCandidate.crowns}
+                                  </div>
+                                )}
+                                <div className="pt-1 sm:pt-2">
+                                  <span className="inline-block w-full bg-zinc-900 hover:bg-yellow-400/10 border border-zinc-800 hover:border-yellow-400/30 text-white group-hover:bg-yellow-400 group-hover:text-black font-mono text-[8px] sm:text-[10px] font-black py-1.5 sm:py-2 rounded-lg uppercase tracking-wider transition-all duration-300">
+                                    Votar 👑
+                                  </span>
+                                </div>
+                              </div>
+                            </motion.div>
+                          )}
+
+                          {/* VS Divider */}
+                          <div className="col-span-1 flex flex-col items-center justify-center">
+                            <div className="w-8 h-8 sm:w-12 sm:h-12 rounded-full bg-yellow-400 text-black font-mono font-black text-xs sm:text-sm flex items-center justify-center shadow-[0_0_15px_rgba(250,204,21,0.3)] border-2 border-black animate-pulse z-10">
+                              VS
+                            </div>
+                            <div className="w-0.5 h-10 sm:h-20 bg-gradient-to-b from-transparent via-zinc-800 to-transparent -mt-2" />
                           </div>
-                          <div className="hidden md:block w-0.5 h-20 bg-gradient-to-b from-transparent via-zinc-800 to-transparent -mt-2" />
+
+                          {/* Right Candidate Card */}
+                          {currentRightCandidate && (
+                            <motion.div
+                              whileHover={{ scale: 1.02 }}
+                              whileTap={{ scale: 0.98 }}
+                              className="col-span-3 bg-[#050506] border border-zinc-900 rounded-xl sm:rounded-2xl overflow-hidden cursor-pointer hover:border-yellow-400/30 transition-all duration-300 shadow-xl flex flex-col group text-left"
+                              onClick={() => handleVoteCandidate(currentRightCandidate.id, currentLeftCandidate?.id ?? '')}
+                            >
+                              <div className="aspect-[4/5] relative bg-zinc-950 overflow-hidden">
+                                <img
+                                  src={currentRightCandidate.photoUrl}
+                                  alt={currentRightCandidate.name}
+                                  referrerPolicy="no-referrer"
+                                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                                  onError={(e) => {
+                                    (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=300';
+                                  }}
+                                />
+                                <div className="absolute inset-0 bg-gradient-to-t from-black via-black/10 to-transparent opacity-60" />
+                                <div className="absolute bottom-2 sm:bottom-4 left-2 sm:left-4 right-2 sm:right-4 text-left">
+                                  <span className="text-[8px] sm:text-[10px] font-mono font-black bg-blue-400 text-black px-1.5 sm:px-2 py-0.5 rounded uppercase tracking-wider">
+                                    Opción B
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="p-2 sm:p-4 text-center space-y-1">
+                                <h5 className="font-sans font-bold text-xs sm:text-sm text-white uppercase group-hover:text-yellow-400 transition-colors line-clamp-1">
+                                  {currentRightCandidate.name}
+                                </h5>
+                                {currentRightCandidate.specialty && (
+                                  <p className="text-[8px] sm:text-[10px] text-yellow-400 font-sans font-semibold uppercase tracking-wider truncate">
+                                    {currentRightCandidate.specialty}
+                                  </p>
+                                )}
+                                <p className="text-[9px] sm:text-[11px] font-mono text-zinc-500">
+                                  ELO: <span className="text-yellow-400 font-bold">{currentRightCandidate.elo ?? 1000}</span>
+                                </p>
+                                {currentRightCandidate.crowns > 0 && (
+                                  <div className="text-[9px] text-yellow-400 font-mono font-bold flex items-center justify-center gap-0.5">
+                                    👑 {currentRightCandidate.crowns}
+                                  </div>
+                                )}
+                                <div className="pt-1 sm:pt-2">
+                                  <span className="inline-block w-full bg-zinc-900 hover:bg-yellow-400/10 border border-zinc-800 hover:border-yellow-400/30 text-white group-hover:bg-yellow-400 group-hover:text-black font-mono text-[8px] sm:text-[10px] font-black py-1.5 sm:py-2 rounded-lg uppercase tracking-wider transition-all duration-300">
+                                    Votar 👑
+                                  </span>
+                                </div>
+                              </div>
+                            </motion.div>
+                          )}
                         </div>
 
-                        {/* Right Candidate Card */}
-                        {currentRightCandidate && (
-                          <motion.div
-                            whileHover={{ scale: 1.02 }}
-                            whileTap={{ scale: 0.98 }}
-                            className="md:col-span-3 bg-[#050506] border border-zinc-900 rounded-2xl overflow-hidden cursor-pointer hover:border-yellow-400/30 transition-all duration-300 shadow-xl flex flex-col group"
-                            onClick={() => handleVoteCandidate(currentRightCandidate.id, currentLeftCandidate?.id ?? '')}
-                          >
-                            <div className="aspect-[4/5] relative bg-zinc-950 overflow-hidden">
-                              <img
-                                src={currentRightCandidate.photoUrl}
-                                alt={currentRightCandidate.name}
-                                referrerPolicy="no-referrer"
-                                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                                onError={(e) => {
-                                  (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=300';
-                                }}
-                              />
-                              <div className="absolute inset-0 bg-gradient-to-t from-black via-black/10 to-transparent opacity-60" />
-                              <div className="absolute bottom-4 left-4 right-4 text-left">
-                                <span className="text-[10px] font-mono font-black bg-blue-400 text-black px-2 py-0.5 rounded uppercase tracking-wider">
-                                  Opción B
-                                </span>
-                              </div>
+                        {/* Maximum Matches / Counter Info below Cards */}
+                        <div className="text-center pt-2 border-t border-zinc-900/60">
+                          <p className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest leading-none">
+                            Sesión Versus: <span className="text-white font-extrabold">{votedPairs.length}</span> de <span className="text-yellow-400 font-extrabold">{totalPossibleMatchups}</span> posibles antes de poder reiniciar
+                          </p>
+                        </div>
+
+                        {/* Real-time Ticking Countdown clock directly underneath */}
+                        {reinadoConfig?.deadlineDate && timeRemaining && (
+                          <div className="flex justify-center items-center pt-1.5">
+                            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-950 border border-zinc-900 shadow-md">
+                              <Clock className="w-3.5 h-3.5 text-yellow-400 animate-pulse" />
+                              <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-wider font-semibold">Cierra en:</span>
+                              <span className="text-xs font-mono font-black text-yellow-400 tracking-wider">
+                                {timeRemaining.days > 0 ? `${timeRemaining.days}d ` : ''}
+                                {String(timeRemaining.hours).padStart(2, '0')}h : {String(timeRemaining.minutes).padStart(2, '0')}m : {String(timeRemaining.seconds).padStart(2, '0')}s
+                              </span>
                             </div>
-                            <div className="p-4 text-center space-y-1">
-                              <h5 className="font-sans font-bold text-sm text-white uppercase group-hover:text-yellow-400 transition-colors">
-                                {currentRightCandidate.name}
-                              </h5>
-                              {currentRightCandidate.specialty && (
-                                <p className="text-[10px] text-yellow-400 font-sans font-semibold uppercase tracking-wider">
-                                  {currentRightCandidate.specialty}
-                                </p>
-                              )}
-                              <p className="text-[11px] font-mono text-zinc-500">
-                                ELO: <span className="text-yellow-400 font-bold">{currentRightCandidate.elo ?? 1000}</span>
-                              </p>
-                              <div className="pt-2">
-                                <span className="inline-block w-full bg-zinc-900 hover:bg-yellow-400/10 border border-zinc-800 hover:border-yellow-400/30 text-white group-hover:bg-yellow-400 group-hover:text-black font-mono text-[10px] font-black py-2 rounded-lg uppercase tracking-wider transition-all duration-300">
-                                  Votar por Ella 👑
-                                </span>
-                              </div>
-                            </div>
-                          </motion.div>
+                          </div>
                         )}
                       </div>
                     )}
@@ -4423,7 +4704,7 @@ export default function App() {
                                   }}
                                 />
 
-                                <div className="min-w-0">
+                                <div className="min-w-0 text-left">
                                   <span className={`block text-xs font-bold uppercase truncate ${isFirst ? 'text-yellow-400 font-extrabold' : 'text-zinc-200'}`}>
                                     {cand.name}
                                   </span>
@@ -4432,9 +4713,16 @@ export default function App() {
                                       {cand.specialty}
                                     </span>
                                   )}
-                                  <span className="block text-[10px] text-zinc-550 font-mono">
-                                    Enfrentamientos: {(cand.votes ?? 0)} votos a favor
-                                  </span>
+                                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                                    <span className="block text-[10px] text-zinc-550 font-mono">
+                                      Enfrentamientos: {(cand.votes ?? 0)} votos a favor
+                                    </span>
+                                    {cand.crowns > 0 && (
+                                      <span className="inline-flex items-center gap-0.5 text-[10px] text-yellow-400 font-mono font-bold leading-none">
+                                        • 👑 {cand.crowns} {cand.crowns === 1 ? 'corona acumulada' : 'coronas acumuladas'}
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
 
@@ -5581,57 +5869,121 @@ export default function App() {
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Form to add candidate */}
-                <div className="bg-[#040405] border border-zinc-900 p-5 rounded-xl space-y-4">
-                  <h3 className="text-xs font-mono font-black text-zinc-300 uppercase tracking-wider">
-                    Agregar Nueva Candidata
-                  </h3>
-                  <form onSubmit={handleRegisterCandidate} className="space-y-3.5">
-                    <div>
-                      <label className="block text-[10px] font-mono text-zinc-500 uppercase mb-1">Nombre Completo</label>
-                      <input
-                        type="text"
-                        required
-                        value={newCandidateName}
-                        onChange={(e) => setNewCandidateName(e.target.value)}
-                        placeholder="Ej. Maria Belen"
-                        className="w-full bg-zinc-950 border border-zinc-900 focus:border-zinc-850 rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-750 outline-none transition-all font-sans"
-                      />
-                    </div>
+                {/* Form to add candidate & Timer config stacked */}
+                <div className="space-y-4">
+                  <div className="bg-[#040405] border border-zinc-900 p-5 rounded-xl space-y-4">
+                    <h3 className="text-xs font-mono font-black text-zinc-300 uppercase tracking-wider">
+                      Agregar Nueva Candidata
+                    </h3>
+                    <form onSubmit={handleRegisterCandidate} className="space-y-3.5">
+                      <div>
+                        <label className="block text-[10px] font-mono text-zinc-500 uppercase mb-1">Nombre Completo</label>
+                        <input
+                          type="text"
+                          required
+                          value={newCandidateName}
+                          onChange={(e) => setNewCandidateName(e.target.value)}
+                          placeholder="Ej. Maria Belen"
+                          className="w-full bg-zinc-950 border border-zinc-900 focus:border-zinc-850 rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-750 outline-none transition-all font-sans"
+                        />
+                      </div>
 
-                    <div>
-                      <label className="block text-[10px] font-mono text-zinc-500 uppercase mb-1">Especialidad / Carrera</label>
-                      <input
-                        type="text"
-                        required
-                        value={newCandidateSpecialty}
-                        onChange={(e) => setNewCandidateSpecialty(e.target.value)}
-                        placeholder="Ej. Ingeniería de Sistemas"
-                        className="w-full bg-zinc-950 border border-zinc-900 focus:border-zinc-850 rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-750 outline-none transition-all font-sans"
-                      />
-                    </div>
+                      <div>
+                        <label className="block text-[10px] font-mono text-zinc-500 uppercase mb-1">Especialidad / Carrera</label>
+                        <input
+                          type="text"
+                          required
+                          value={newCandidateSpecialty}
+                          onChange={(e) => setNewCandidateSpecialty(e.target.value)}
+                          placeholder="Ej. Ingeniería de Sistemas"
+                          className="w-full bg-zinc-950 border border-zinc-900 focus:border-zinc-850 rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-750 outline-none transition-all font-sans"
+                        />
+                      </div>
 
-                    <div>
-                      <label className="block text-[10px] font-mono text-zinc-500 uppercase mb-1">Enlace de Foto (URL)</label>
-                      <input
-                        type="url"
-                        required
-                        value={newCandidatePhoto}
-                        onChange={(e) => setNewCandidatePhoto(e.target.value)}
-                        placeholder="https://images.unsplash.com/photo-..."
-                        className="w-full bg-zinc-950 border border-zinc-900 focus:border-zinc-850 rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-750 outline-none transition-all font-mono"
-                      />
-                      <p className="text-[9px] text-zinc-650 mt-1">Sugerencia: Usa imágenes de Unsplash o enlaces directos.</p>
-                    </div>
+                      <div>
+                        <label className="block text-[10px] font-mono text-zinc-500 uppercase mb-1">Enlace de Foto (URL)</label>
+                        <input
+                          type="url"
+                          required
+                          value={newCandidatePhoto}
+                          onChange={(e) => setNewCandidatePhoto(e.target.value)}
+                          placeholder="https://images.unsplash.com/photo-..."
+                          className="w-full bg-zinc-950 border border-zinc-900 focus:border-zinc-850 rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-750 outline-none transition-all font-mono"
+                        />
+                        <p className="text-[9px] text-zinc-650 mt-1">Sugerencia: Usa imágenes de Unsplash o enlaces directos.</p>
+                      </div>
 
-                    <button
-                      type="submit"
-                      disabled={isSubmittingCandidate}
-                      className="w-full bg-yellow-400 hover:bg-yellow-350 disabled:bg-zinc-900 disabled:text-zinc-600 text-black font-mono font-black text-xs py-2.5 rounded-lg transition-all cursor-pointer uppercase tracking-wider"
-                    >
-                      {isSubmittingCandidate ? 'Guardando...' : 'Registrar Candidata'}
-                    </button>
-                  </form>
+                      <button
+                        type="submit"
+                        disabled={isSubmittingCandidate}
+                        className="w-full bg-yellow-400 hover:bg-yellow-350 disabled:bg-zinc-900 disabled:text-zinc-600 text-black font-mono font-black text-xs py-2.5 rounded-lg transition-all cursor-pointer uppercase tracking-wider"
+                      >
+                        {isSubmittingCandidate ? 'Guardando...' : 'Registrar Candidata'}
+                      </button>
+                    </form>
+                  </div>
+
+                  {/* Countdown Timer Config */}
+                  <div className="bg-[#040405] border border-zinc-900 p-5 rounded-xl space-y-4">
+                    <h3 className="text-xs font-mono font-black text-zinc-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5 text-yellow-400" />
+                      Temporizador de Finalización
+                    </h3>
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-[10px] font-mono text-zinc-500 uppercase mb-1">Fecha y Hora Límite (Día / Mes / Año)</label>
+                        <input
+                          type="datetime-local"
+                          value={reinadoConfig?.deadlineDate || ''}
+                          onChange={async (e) => {
+                            if (!selectedInstituteId) return;
+                            const val = e.target.value || null;
+                            try {
+                              await setDoc(doc(db, 'centros.educativos', selectedInstituteId, 'reinado_config', 'settings'), {
+                                deadlineDate: val
+                              }, { merge: true });
+                              triggerNotice(val ? 'Temporizador guardado correctamente.' : 'Temporizador eliminado.');
+                            } catch (err) {
+                              console.error("Error setting deadline:", err);
+                            }
+                          }}
+                          className="w-full bg-zinc-950 border border-zinc-900 focus:border-zinc-850 rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-750 outline-none transition-all font-mono"
+                        />
+                      </div>
+
+                      {reinadoConfig?.deadlineDate && (
+                        <div className="bg-yellow-400/5 border border-yellow-400/10 rounded-lg p-3 text-center space-y-1">
+                          <p className="text-[9px] font-mono text-yellow-400 uppercase tracking-wider leading-none mb-1">La votación finalizará el:</p>
+                          <p className="text-xs text-zinc-200 font-sans font-bold leading-tight">
+                            {new Date(reinadoConfig.deadlineDate).toLocaleString('es-ES', {
+                              day: 'numeric',
+                              month: 'long',
+                              year: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              if (!selectedInstituteId) return;
+                              try {
+                                await setDoc(doc(db, 'centros.educativos', selectedInstituteId, 'reinado_config', 'settings'), {
+                                  deadlineDate: null
+                                }, { merge: true });
+                                triggerNotice('Temporizador eliminado.');
+                              } catch (err) {
+                                console.error("Error clearing deadline:", err);
+                              }
+                            }}
+                            className="text-[9px] font-mono text-red-450 hover:text-red-400 underline uppercase mt-2.5 block mx-auto cursor-pointer font-black"
+                          >
+                            Eliminar Temporizador
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
 
                 {/* Candidate List & Status */}
