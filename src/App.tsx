@@ -61,7 +61,7 @@ import {
   Clock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Institute, Alumno, AlumnoComment } from './types';
+import { Institute, Alumno, AlumnoComment, ReinadaEstadistica } from './types';
 import { INITIAL_INSTITUTES, INITIAL_ALUMNOS, INITIAL_COMMENTS } from './data';
 import { db, auth, handleFirestoreError, OperationType, ensureAnonymousSignIn } from './firebase';
 import { collection, doc, setDoc, getDoc, getDocs, deleteDoc, onSnapshot, serverTimestamp, increment, runTransaction, deleteField } from 'firebase/firestore';
@@ -230,8 +230,17 @@ export default function App() {
     });
   };
 
-  const handleShareReinado = () => {
+  const handleShareReinado = async () => {
     if (!currentSelectedInstitute) return;
+    
+    try {
+      await setDoc(doc(db, 'reinado.estadistica', 'general'), {
+        vecesCompartido: increment(1)
+      }, { merge: true });
+    } catch (e) {
+      console.warn("Error updating share stats:", e);
+    }
+
     const url = `${window.location.origin}/campus/${currentSelectedInstitute.id}?tab=reinado`;
     const text = `👑 ¡Vota por tu candidata favorita en el Versus ELO del Reinado de *${currentSelectedInstitute.name}*! Elige quién ganará la corona aquí: ${url}`;
     setShareData({
@@ -641,9 +650,15 @@ export default function App() {
   const [newCandidateSpecialty, setNewCandidateSpecialty] = useState('');
   const [isSubmittingCandidate, setIsSubmittingCandidate] = useState(false);
   const [reinadoConfig, setReinadoConfig] = useState<{ deadlineDate: string | null } | null>(null);
-  const [votedPairs, setVotedPairs] = useState<string[]>([]);
+  const [votedPairs, setVotedPairs] = useState<string[]>(() => {
+    const saved = localStorage.getItem('wikistars_voted_pairs');
+    return saved ? JSON.parse(saved) : [];
+  });
   const [now, setNow] = useState<number>(Date.now());
-  const [reinadoSubTab, setReinadoSubTab] = useState<'elos' | 'coronas' | 'estadistica'>('elos');
+  const [reinadoSubTab, setReinadoSubTab] = useState<'elos' | 'coronas' | 'estadistica'>(() => {
+    const saved = localStorage.getItem('wikistars_reinado_subtab');
+    return (saved as any) || 'elos';
+  });
   const [reinadaStats, setReinadaStats] = useState<ReinadaEstadistica | null>(null);
   const [selectedEstadisticaCandId, setSelectedEstadisticaCandId] = useState<string | null>(null);
   const [candWinsList, setCandWinsList] = useState<any[]>([]);
@@ -878,9 +893,16 @@ export default function App() {
     return () => unsubscribe();
   }, [selectedInstituteId]);
 
-  // Load reinado candidates for active institute in real-time
+  // Persist Reinado state
   useEffect(() => {
-    const unsubscribe = onSnapshot(doc(db, 'reinada.estadistica', 'general'), (snap) => {
+    localStorage.setItem('wikistars_reinado_subtab', reinadoSubTab);
+  }, [reinadoSubTab]);
+
+  useEffect(() => {
+    localStorage.setItem('wikistars_voted_pairs', JSON.stringify(votedPairs));
+  }, [votedPairs]);
+  useEffect(() => {
+    const unsubscribe = onSnapshot(doc(db, 'reinado.estadistica', 'general'), (snap) => {
       if (snap.exists()) {
         setReinadaStats(snap.data() as ReinadaEstadistica);
       }
@@ -2239,6 +2261,11 @@ export default function App() {
     }
 
     try {
+      // Update global stats
+      await setDoc(doc(db, 'reinado.estadistica', 'general'), {
+        totalVotosVersus: increment(1)
+      }, { merge: true });
+
       await setDoc(doc(db, 'centros.educativos', selectedInstituteId, 'reinado', winnerId), {
         ...winner,
         elo: newRA,
@@ -4542,25 +4569,6 @@ export default function App() {
                   exit={{ opacity: 0 }}
                   className="space-y-8"
                 >
-                  {/* Global Tabs navigation */}
-                  <div className="flex flex-wrap items-center gap-2 border-b border-zinc-900 pb-4 mb-4">
-                    {[
-                      { id: 'elos', label: 'ELOs ⚔️' },
-                      { id: 'coronas', label: 'Coronas 👑' },
-                      { id: 'estadistica', label: 'Estadística 📊' }
-                    ].map((tab) => (
-                      <button
-                        key={tab.id}
-                        onClick={() => setReinadoSubTab(tab.id as any)}
-                        className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${reinadoSubTab === tab.id ? 'bg-yellow-500 text-black' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}`}
-                      >
-                        {tab.label}
-                      </button>
-                    ))}
-                  </div>
-
-                  {reinadoSubTab === 'elos' && (
-                    <>
                       {/* ELO Matchup Versus Arena */}
                       <div className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl p-6 sm:p-8 space-y-6">
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-zinc-900 pb-4 gap-4">
@@ -4734,9 +4742,17 @@ export default function App() {
                           </p>
                         </div>
                         <button
-                          onClick={() => {
+                          onClick={async () => {
                             setVotedPairs([]);
                             triggerNotice("Sesión de Versus reiniciada. ¡A votar de nuevo! 👑");
+                            
+                            try {
+                              await setDoc(doc(db, 'reinado.estadistica', 'general'), {
+                                totalVotosOtraVez: increment(1)
+                              }, { merge: true });
+                            } catch (e) {
+                              console.warn("Error updating reset stats:", e);
+                            }
                           }}
                           className="bg-yellow-400 hover:bg-yellow-350 text-black font-mono font-black text-xs px-5 py-2.5 rounded-lg uppercase tracking-wider transition-all cursor-pointer inline-flex items-center gap-1.5"
                         >
@@ -4882,25 +4898,26 @@ export default function App() {
                     )}
                   </div>
 
-                  {/* ELO Leaderboard list */}
-                  <div className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl p-6 sm:p-8 space-y-5">
-                    {/* Tabs navigation */}
+                  {/* Shared Tabs Navigation (Sub-tabs for Reinado) */}
                     <div className="flex w-full items-center gap-2 border-b border-zinc-900 pb-4 mb-4">
-                      {[
-                        { id: 'elos', label: 'ELOs ⚔️' },
-                        { id: 'coronas', label: 'Coronas 👑' },
-                        { id: 'estadistica', label: 'Estadística 📊' }
-                      ].map((tab) => (
-                        <button
-                          key={tab.id}
-                          onClick={() => setReinadoSubTab(tab.id as any)}
-                          className={`flex-1 px-4 py-2 rounded-lg text-xs font-bold transition-colors ${reinadoSubTab === tab.id ? 'bg-yellow-500 text-black' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}`}
-                        >
-                          {tab.label}
-                        </button>
-                      ))}
-                    </div>
+                        {[
+                          { id: 'elos', label: 'ELOs ⚔️' },
+                          { id: 'coronas', label: 'Coronas 👑' },
+                          { id: 'estadistica', label: 'Estadística 📊' }
+                        ].map((tab) => (
+                          <button
+                            key={tab.id}
+                            onClick={() => setReinadoSubTab(tab.id as any)}
+                            className={`flex-1 px-4 py-2 rounded-lg text-xs font-bold transition-colors ${reinadoSubTab === tab.id ? 'bg-yellow-500 text-black' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}`}
+                          >
+                            {tab.label}
+                          </button>
+                        ))}
+                      </div>
 
+                  {/* ELO Leaderboard list */}
+                  {reinadoSubTab === 'elos' && (
+                  <div className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl p-6 sm:p-8 space-y-5">
                     <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
                       <div className="flex items-center gap-2">
                         <Trophy className="w-4 h-4 text-yellow-400" />
@@ -4972,16 +4989,6 @@ export default function App() {
                                       {cand.specialty}
                                     </span>
                                   )}
-                                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                                    <span className="block text-[10px] text-zinc-550 font-mono">
-                                      Enfrentamientos: {(cand.votes ?? 0)} votos a favor
-                                    </span>
-                                    {cand.crowns > 0 && (
-                                      <span className="inline-flex items-center gap-0.5 text-[10px] text-yellow-400 font-mono font-bold leading-none">
-                                        • 👑 {cand.crowns} {cand.crowns === 1 ? 'corona acumulada' : 'coronas acumuladas'}
-                                      </span>
-                                    )}
-                                  </div>
                                 </div>
                               </div>
 
@@ -4999,7 +5006,6 @@ export default function App() {
                       </div>
                     )}
                   </div>
-                  </>
                   )}
 
                   {/* SUB-TAB 2: CORONAS */}
@@ -5010,21 +5016,6 @@ export default function App() {
                       animate={{ opacity: 1, y: 0 }}
                       className="space-y-6"
                     >
-                      {/* Royal Header Intro */}
-                      <div className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl p-6 sm:p-8 space-y-4 text-center max-w-3xl mx-auto">
-                        <div className="w-16 h-16 rounded-full bg-yellow-400/10 border-2 border-yellow-400/20 flex items-center justify-center mx-auto text-yellow-400 shadow-[0_0_20px_rgba(250,204,21,0.1)]">
-                          <Crown className="w-8 h-8 animate-bounce" />
-                        </div>
-                        <div className="space-y-1.5">
-                          <h4 className="text-xl font-display font-black text-white uppercase tracking-wider">
-                            EL TRONO DE CORONAS 👑
-                          </h4>
-                          <p className="text-xs text-zinc-400 max-w-xl mx-auto leading-relaxed font-sans">
-                            Cada vez que una candidata asciende al puesto #1 en el ranking ELO y desplaza a la anterior líder, se le otorga una <strong>Corona de Honor</strong>. El ranking a continuación destaca a las reinas más coronadas de la institución.
-                          </p>
-                        </div>
-                      </div>
-
                       {/* Crowns Leaderboard */}
                       <div className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl p-6 sm:p-8 space-y-5">
                         <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
@@ -5090,9 +5081,6 @@ export default function App() {
                                             {cand.specialty}
                                           </span>
                                         )}
-                                        <span className="block text-[10px] text-zinc-550 font-mono">
-                                          Puntaje ELO: {cand.elo ?? 1000} PTS
-                                        </span>
                                       </div>
                                     </div>
 
@@ -5120,31 +5108,7 @@ export default function App() {
                       animate={{ opacity: 1, y: 0 }}
                       className="space-y-6"
                     >
-                      {/* Sub-tab Intro */}
-                      <div className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl p-6 sm:p-8 space-y-2 text-left">
-                        <h4 className="text-base font-display font-black text-white uppercase tracking-wider flex items-center gap-2">
-                          <BarChart2 className="w-5 h-5 text-yellow-400" />
-                          Estadísticas Generales del Reinado
-                        </h4>
-                        {/* Stats Grid */}
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4">
-                           <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-900 text-center">
-                             <span className="text-zinc-500 font-mono text-[10px] uppercase block mb-1">Veces compartido</span>
-                             <span className="block text-xl font-black text-yellow-400">{reinadaStats?.vecesCompartido ?? 0}</span>
-                           </div>
-                           <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-900 text-center">
-                             <span className="text-zinc-500 font-mono text-[10px] uppercase block mb-1">Total votos versus</span>
-                             <span className="block text-xl font-black text-white">{reinadaStats?.totalVotosVersus ?? 0}</span>
-                           </div>
-                           <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-900 text-center">
-                             <span className="text-zinc-500 font-mono text-[10px] uppercase block mb-1">Votos "otra vez"</span>
-                             <span className="block text-xl font-black text-zinc-300">{reinadaStats?.totalVotosOtraVez ?? 0}</span>
-                           </div>
-                         </div>
-                        <p className="text-xs text-zinc-400 leading-relaxed max-w-2xl font-sans">
-                          Explora el registro oficial de duelos de cada candidata. Selecciona una candidata para ver en tiempo real contra quiénes ha ganado y contra quiénes ha perdido en el Versus ELO.
-                        </p>
-                      </div>
+
 
                       {/* Grid / Selection Strip of Candidates */}
                       <div className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl p-4 sm:p-6 space-y-4">
