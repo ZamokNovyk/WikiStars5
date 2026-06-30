@@ -4542,6 +4542,25 @@ export default function App() {
                   exit={{ opacity: 0 }}
                   className="space-y-8"
                 >
+                  {/* Global Tabs navigation */}
+                  <div className="flex flex-wrap items-center gap-2 border-b border-zinc-900 pb-4 mb-4">
+                    {[
+                      { id: 'elos', label: 'ELOs ⚔️' },
+                      { id: 'coronas', label: 'Coronas 👑' },
+                      { id: 'estadistica', label: 'Estadística 📊' }
+                    ].map((tab) => (
+                      <button
+                        key={tab.id}
+                        onClick={() => setReinadoSubTab(tab.id as any)}
+                        className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${reinadoSubTab === tab.id ? 'bg-yellow-500 text-black' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}`}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {reinadoSubTab === 'elos' && (
+                    <>
                       {/* ELO Matchup Versus Arena */}
                       <div className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl p-6 sm:p-8 space-y-6">
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-zinc-900 pb-4 gap-4">
@@ -4860,7 +4879,8 @@ export default function App() {
                           </div>
                         )}
                       </div>
-                  </motion.div>
+                    )}
+                  </div>
 
                   {/* ELO Leaderboard list */}
                   <div className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl p-6 sm:p-8 space-y-5">
