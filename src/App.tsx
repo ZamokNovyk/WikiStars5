@@ -711,7 +711,7 @@ export default function App() {
       const existsLeft = reinadoCandidates.some(c => c.id === currentLeftId);
       const existsRight = reinadoCandidates.some(c => c.id === currentRightId);
       const currentPairKey = (currentLeftId && currentRightId)
-        ? (currentLeftId < currentRightId ? `${currentLeftId}_${currentRightId}` : `${currentRightId}_${currentLeftId}`)
+        ? (currentLeftId < currentRightId ? `${currentLeftId}::${currentRightId}` : `${currentRightId}::${currentLeftId}`)
         : null;
 
       const isCurrentValidAndUnvoted = currentLeftId && currentRightId && existsLeft && existsRight && currentLeftId !== currentRightId && (!currentPairKey || !votedPairs.includes(currentPairKey));
@@ -723,14 +723,14 @@ export default function App() {
           for (let j = i + 1; j < reinadoCandidates.length; j++) {
             const idA = reinadoCandidates[i].id;
             const idB = reinadoCandidates[j].id;
-            allPairs.push(idA < idB ? `${idA}_${idB}` : `${idB}_${idA}`);
+            allPairs.push(idA < idB ? `${idA}::${idB}` : `${idB}::${idA}`);
           }
         }
         const unvoted = allPairs.filter(p => !votedPairs.includes(p));
 
         if (unvoted.length > 0) {
           const randomPair = unvoted[Math.floor(Math.random() * unvoted.length)];
-          const [idA, idB] = randomPair.split('_');
+          const [idA, idB] = randomPair.split('::');
           if (Math.random() > 0.5) {
             setCurrentLeftId(idA);
             setCurrentRightId(idB);
@@ -2128,7 +2128,7 @@ export default function App() {
       }, { merge: true });
 
       // Add to voted pairs list
-      const votedPairKey = winnerId < loserId ? `${winnerId}_${loserId}` : `${loserId}_${winnerId}`;
+      const votedPairKey = winnerId < loserId ? `${winnerId}::${loserId}` : `${loserId}::${winnerId}`;
       setVotedPairs(prev => [...prev, votedPairKey]);
     } catch (error) {
       console.error("Error voting candidate:", error);

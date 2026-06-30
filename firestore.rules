@@ -65,6 +65,16 @@ service cloud.firestore {
       match /profesores/{profesorId} {
         allow read, write: if true;
       }
+
+      // Reinado subcollection inside each educational center
+      match /reinado/{candidateId} {
+        allow read, write: if true;
+      }
+
+      // Reinado config subcollection inside each educational center
+      match /reinado_config/{configId} {
+        allow read, write: if true;
+      }
     }
 
     // Perfiles general collection (currently used for professors profiles)
