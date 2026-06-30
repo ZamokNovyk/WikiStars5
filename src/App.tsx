@@ -2712,8 +2712,8 @@ export default function App() {
 
   // Dynamic Open Graph / Meta tags update for WhatsApp/etc sharing
   useEffect(() => {
-    let title = "Starryz5";
-    let desc = "Plataforma de centros educativos y perfiles.";
+    let title = "Starryz5: Popularidad estudiantil";
+    let desc = "Descubre la popularidad de estudiantes, docentes e instituciones. Compara perfiles, vota en Versus ELO de reinados, califica a tus profesores favoritos y sé parte de la comunidad de tu centro educativo.";
     let imageUrl = "https://firebasestorage.googleapis.com/v0/b/wikistars5-465e1.firebasestorage.app/o/wikistars5logo.png?alt=media&token=026f822e-3b69-4538-b0ef-28dacb65551e"; // default logo
     let url = window.location.href;
 
