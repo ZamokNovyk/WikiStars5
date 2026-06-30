@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { ResultadosView } from './components/ResultadosView';
 import { 
+  Check,
   Search, 
   ThumbsUp,
   ThumbsDown,
@@ -663,6 +664,14 @@ export default function App() {
   const [selectedEstadisticaCandId, setSelectedEstadisticaCandId] = useState<string | null>(null);
   const [candWinsList, setCandWinsList] = useState<any[]>([]);
   const [candLossesList, setCandLossesList] = useState<any[]>([]);
+
+  // New state for implementation voting (two questions)
+  const [votedPregunta1, setVotedPregunta1] = useState<boolean>(() => {
+    return localStorage.getItem('wikistars_voted_pregunta1') === 'true';
+  });
+  const [votedPregunta2, setVotedPregunta2] = useState<boolean>(() => {
+    return localStorage.getItem('wikistars_voted_pregunta2') === 'true';
+  });
   const [isLoadingEstadisticas, setIsLoadingEstadisticas] = useState(false);
 
   // Ticker for ELO countdown real-time display
@@ -2206,6 +2215,29 @@ export default function App() {
     }
   };
 
+  const handleImplementationVote = async (preguntaId: 'pregunta1' | 'pregunta2', vote: 'si' | 'no') => {
+    if (!selectedInstituteId) return;
+    
+    try {
+      const field = vote === 'si' ? 'votosSi' : 'votosNo';
+      await setDoc(doc(db, 'centros.educativos', selectedInstituteId, 'muy.pronto', preguntaId), {
+        [field]: increment(1)
+      }, { merge: true });
+      
+      if (preguntaId === 'pregunta1') {
+        setVotedPregunta1(true);
+        localStorage.setItem('wikistars_voted_pregunta1', 'true');
+      } else {
+        setVotedPregunta2(true);
+        localStorage.setItem('wikistars_voted_pregunta2', 'true');
+      }
+      
+      triggerNotice(`¡Gracias por tu voto! 🎉`);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `centros.educativos/${selectedInstituteId}/muy.pronto/${preguntaId}`);
+    }
+  };
+
   // Vote in the Reinado ELO Versus
   const handleVoteCandidate = async (winnerId: string, loserId: string) => {
     if (!selectedInstituteId) return;
@@ -3598,7 +3630,7 @@ export default function App() {
                   ? [{ id: 'Reinado', label: 'Reinado', icon: <Crown className="w-3.5 h-3.5" /> }]
                   : []),
                 { id: 'Profesores', label: 'Profesores', icon: <Shield className="w-3.5 h-3.5" /> },
-                { id: 'Rachas', label: 'Rachas', icon: <Flame className="w-3.5 h-3.5" /> },
+                { id: 'Rachas', label: 'Muy pronto', icon: <Flame className="w-3.5 h-3.5" /> },
               ].map(tab => {
                 const isActive = activeCampusTab === tab.id;
                 return (
@@ -4477,86 +4509,126 @@ export default function App() {
                 </motion.div>
               )}
 
-              {/* TAB 6: RACHAS DAILY ENGAGEMENT */}
+              {/* TAB 6: MUY PRONTO - IMPLEMENTATION VOTING */}
               {activeCampusTab === 'Rachas' && (
                 <motion.div
-                  key="tab-rachas-panel"
+                  key="tab-muy-pronto-panel"
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0 }}
-                  className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl p-5 sm:p-8 space-y-6"
+                  className="bg-[#0b0b0c] border border-zinc-900 rounded-2xl p-5 sm:p-12 flex flex-col items-center justify-center text-center space-y-8 min-h-[400px]"
                 >
-                  <div className="flex flex-col sm:flex-row items-center justify-between gap-4 border-b border-zinc-850 pb-5">
-                    <div className="space-y-1 text-center sm:text-left">
-                      <h3 className="font-display font-black text-lg text-white uppercase tracking-widest flex items-center justify-center sm:justify-start gap-2">
-                        <Flame className="w-5 h-5 text-amber-500 fill-amber-500 animate-pulse" />
-                        TABLERO DE ESTADÍSTICAS Y RACHAS DIARIAS
-                      </h3>
-                      <p className="text-xs text-zinc-400 font-sans">
-                        Reclama tus puntos diarios de Starryz y compite por mantener viva tu racha en Uchiza.
-                      </p>
+                  <div className="space-y-4">
+                    <div className="w-20 h-20 rounded-full bg-yellow-400/10 flex items-center justify-center mx-auto text-yellow-400 border border-yellow-400/20 shadow-[0_0_30px_rgba(250,204,21,0.1)]">
+                      <Flame className="w-10 h-10 animate-pulse" />
                     </div>
-
-                    <div className="bg-amber-500/10 border border-amber-500/20 px-3.5 py-2 rounded-xl text-center self-stretch sm:self-auto shrink-0">
-                      <span className="block text-[8px] font-mono text-amber-500 uppercase font-black">Mi Racha de Ficha</span>
-                      <span className="text-base font-black text-white font-mono flex items-center justify-center gap-0.5">
-                        🔥 {userStreakCount} DÍAS
-                      </span>
-                    </div>
+                    <h3 className="font-display font-black text-2xl sm:text-3xl text-white uppercase tracking-tighter">
+                      MUY PRONTO 🚀
+                    </h3>
+                    <p className="text-zinc-400 font-sans text-sm max-w-md mx-auto leading-relaxed">
+                      Estamos preparando algo increíble para conectar aún más a la comunidad de <strong>{currentSelectedInstitute.name}</strong>.
+                    </p>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
-                    <div className="space-y-4 md:col-span-2">
-                      <h4 className="font-sans font-bold text-xs text-zinc-200 uppercase tracking-wider">¿Por qué es importante una racha?</h4>
-                      <p className="text-xs sm:text-sm text-zinc-400 leading-relaxed font-sans font-medium">
-                        Starryz5 promueve la participation activa de los alumnos. Aquellos compañeros que visiten la applet de manera cotidiana, voten, comenten constructivamente o sugieran nuevas estrellas de Uchiza obtienen rachas y recompensas que elevan el prestigio de su instituto.
-                      </p>
-
-                      <div className="bg-[#121214]/60 border border-zinc-900 p-5 rounded-xl text-center space-y-3">
-                        <p className="text-xs text-zinc-350 font-sans font-semibold">
-                          {streakClaimed 
-                            ? '🎉 ¡Excelente! Has sumado tu voto de racha diaria hoy. Regresa mañana.'
-                            : '⚡ ¿Listo para hoy? Presiona el botón para agregar 1 día de presencia y registrar tu actividad.'}
-                        </p>
-                        <button
-                          disabled={streakClaimed}
-                          onClick={() => {
-                            setStreakClaimed(true);
-                            setUserStreakCount(c => c + 1);
-                            // add social log
-                            setSocialLogs(l => [`⚡ ¡Reclamaste tu racha diaria de la Wiki y sumaste puntos!`, ...l.slice(0, 4)]);
-                          }}
-                          className={`px-5 py-3 rounded-full font-mono text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
-                            streakClaimed
-                              ? 'bg-zinc-900 text-zinc-500 border border-zinc-800'
-                              : 'bg-yellow-400 hover:bg-yellow-300 text-black shadow-[0_4px_15px_rgba(250,204,21,0.2)]'
-                          }`}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-4xl">
+                    <AnimatePresence mode="wait">
+                      {!votedPregunta1 ? (
+                        <motion.div 
+                          key="q1-active"
+                          initial={{ opacity: 0, scale: 0.95 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: 1.05 }}
+                          className="bg-zinc-950/50 border border-zinc-900 p-6 sm:p-8 rounded-3xl space-y-6 flex flex-col"
                         >
-                          {streakClaimed ? '✓ RECOMPENSA RECLAMADA' : 'Claim Daily Streak +1 🔥'}
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Streak leaders panel */}
-                    <div className="bg-zinc-950 border border-zinc-900 p-4 rounded-xl space-y-4">
-                      <h4 className="font-mono text-xs font-black text-zinc-400 uppercase tracking-widest text-center border-b border-zinc-900 pb-2">
-                        🔥 LÍDERES DE RACHAS (UCHIZA)
-                      </h4>
-                      <div className="space-y-3">
-                        {[
-                          { name: 'Alicia Aurelia Berrospi', days: 12 },
-                          { name: 'Almendra Jennifer Daza', days: 7 },
-                          { name: 'Mateo Sebastiani', days: 5 },
-                          { name: 'Tú (Estudiante)', days: userStreakCount }
-                        ].map((leader, i) => (
-                          <div key={i} className="flex items-center justify-between text-xs font-mono border-b border-[#121214] pb-2">
-                            <span className="text-zinc-400 truncate max-w-[140px] uppercase font-bold">{leader.name}</span>
-                            <span className="text-yellow-400 font-extrabold">{leader.days} DÍAS 🔥</span>
+                          <h4 className="font-sans font-bold text-white text-lg leading-snug flex-grow">
+                            ¿Te gustaría que implementemos el top de rachas? 
+                          </h4>
+                          
+                          <div className="flex gap-3">
+                            <button
+                              onClick={() => handleImplementationVote('pregunta1', 'si')}
+                              className="flex-1 bg-yellow-400 hover:bg-yellow-300 text-black font-mono font-black py-3.5 rounded-xl transition-all cursor-pointer active:scale-95 shadow-[0_8px_20px_rgba(250,204,21,0.1)] text-xs"
+                            >
+                              SÍ ✅
+                            </button>
+                            <button
+                              onClick={() => handleImplementationVote('pregunta1', 'no')}
+                              className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white font-mono font-black py-3.5 rounded-xl transition-all cursor-pointer active:scale-95 text-xs"
+                            >
+                              NO ❌
+                            </button>
                           </div>
-                        ))}
-                      </div>
-                    </div>
+                        </motion.div>
+                      ) : (
+                        <motion.div
+                          key="q1-voted"
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="bg-zinc-900/20 border border-zinc-900/50 p-8 rounded-3xl flex flex-col items-center justify-center space-y-3 opacity-60"
+                        >
+                          <div className="w-10 h-10 rounded-full bg-green-500/10 flex items-center justify-center text-green-500">
+                            <Check className="w-5 h-5" />
+                          </div>
+                          <p className="text-zinc-500 text-xs font-mono font-bold uppercase tracking-wider">Voto Registrado</p>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
+                    <AnimatePresence mode="wait">
+                      {!votedPregunta2 ? (
+                        <motion.div 
+                          key="q2-active"
+                          initial={{ opacity: 0, scale: 0.95 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: 1.05 }}
+                          className="bg-zinc-950/50 border border-zinc-900 p-6 sm:p-8 rounded-3xl space-y-6 flex flex-col"
+                        >
+                          <h4 className="font-sans font-bold text-white text-lg leading-snug flex-grow">
+                            ¿Te gustaría que implementemos un sistema para calificar a estudiantes con estrellas similar al de los profesores?
+                          </h4>
+                          
+                          <div className="flex gap-3">
+                            <button
+                              onClick={() => handleImplementationVote('pregunta2', 'si')}
+                              className="flex-1 bg-yellow-400 hover:bg-yellow-300 text-black font-mono font-black py-3.5 rounded-xl transition-all cursor-pointer active:scale-95 shadow-[0_8px_20px_rgba(250,204,21,0.1)] text-xs"
+                            >
+                              SÍ ✅
+                            </button>
+                            <button
+                              onClick={() => handleImplementationVote('pregunta2', 'no')}
+                              className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white font-mono font-black py-3.5 rounded-xl transition-all cursor-pointer active:scale-95 text-xs"
+                            >
+                              NO ❌
+                            </button>
+                          </div>
+                        </motion.div>
+                      ) : (
+                        <motion.div
+                          key="q2-voted"
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="bg-zinc-900/20 border border-zinc-900/50 p-8 rounded-3xl flex flex-col items-center justify-center space-y-3 opacity-60"
+                        >
+                          <div className="w-10 h-10 rounded-full bg-green-500/10 flex items-center justify-center text-green-500">
+                            <Check className="w-5 h-5" />
+                          </div>
+                          <p className="text-zinc-500 text-xs font-mono font-bold uppercase tracking-wider">Voto Registrado</p>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
+
+                  {(votedPregunta1 || votedPregunta2) && (
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="pt-4"
+                    >
+                      <p className="text-zinc-500 text-[10px] font-sans italic">
+                        * Tus respuestas nos ayudan a priorizar las mejores funciones para la comunidad.
+                      </p>
+                    </motion.div>
+                  )}
                 </motion.div>
               )}
 

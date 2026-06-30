@@ -22,6 +22,8 @@ export interface Institute {
   anoDeFundacion?: number | null;
   redesSociales?: RedesSociales;
   tipo?: 'instituto' | 'colegio' | 'universidad';
+  implementacionVotosSi?: number;
+  implementacionVotosNo?: number;
 }
 
 export interface Alumno {
