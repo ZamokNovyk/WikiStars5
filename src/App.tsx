@@ -68,6 +68,14 @@ import { db, auth, handleFirestoreError, OperationType, ensureAnonymousSignIn } 
 import { collection, doc, setDoc, getDoc, getDocs, deleteDoc, onSnapshot, serverTimestamp, increment, runTransaction, deleteField } from 'firebase/firestore';
 import { GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 
+const STAR_SOUNDS: Record<number, string> = {
+  1: "https://firebasestorage.googleapis.com/v0/b/wikistars5-465e1.firebasestorage.app/o/star.sonidos%2Fstar1.mp3?alt=media&token=a2e0edf7-501c-48b2-907f-54dc2b42fa9a",
+  2: "https://firebasestorage.googleapis.com/v0/b/wikistars5-465e1.firebasestorage.app/o/star.sonidos%2Fstar2.mp3?alt=media&token=6ebdde08-3225-4b5c-bea6-514616c023c1",
+  3: "https://firebasestorage.googleapis.com/v0/b/wikistars5-465e1.firebasestorage.app/o/star.sonidos%2Fstar3.mp3?alt=media&token=fa13765c-7b11-47ef-8365-71cd7ef62c06",
+  4: "https://firebasestorage.googleapis.com/v0/b/wikistars5-465e1.firebasestorage.app/o/star.sonidos%2Fstar4.mp3?alt=media&token=8f7d527f-80f4-48bc-84cf-5f0faf6606a6",
+  5: "https://firebasestorage.googleapis.com/v0/b/wikistars5-465e1.firebasestorage.app/o/star.sonidos%2Fstar5.mp3?alt=media&token=780e3a2f-a511-4ebb-bf94-d6f9739944b6",
+};
+
 function generateDocId(rawName: string) {
   return rawName.toLowerCase()
     .replace(/\s+/g, '.')
@@ -673,6 +681,23 @@ export default function App() {
     return localStorage.getItem('wikistars_voted_pregunta2') === 'true';
   });
   const [isLoadingEstadisticas, setIsLoadingEstadisticas] = useState(false);
+
+  // Pre-load star sounds for better performance
+  useEffect(() => {
+    Object.values(STAR_SOUNDS).forEach(url => {
+      const audio = new Audio();
+      audio.src = url;
+      audio.load();
+    });
+  }, []);
+
+  const playStarSound = (rating: number) => {
+    const url = STAR_SOUNDS[rating];
+    if (url) {
+      const audio = new Audio(url);
+      audio.play().catch(e => console.warn("Audio play failed:", e));
+    }
+  };
 
   // Ticker for ELO countdown real-time display
   useEffect(() => {
@@ -1670,6 +1695,10 @@ export default function App() {
 
   const handleSubmitReview = async (rating: number) => {
     if (!selectedProfessorId || !selectedInstituteId || isSubmittingReview) return;
+    
+    // Play sound immediately for instant feedback
+    playStarSound(rating);
+
     setIsSubmittingReview(true);
     try {
       const user = await ensureAnonymousSignIn();
