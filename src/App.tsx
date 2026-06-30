@@ -230,7 +230,8 @@ export default function App() {
     if (!prof) return;
     const url = `${window.location.origin}/perfiles/${prof.id}`;
     const instName = currentSelectedInstitute?.name || "su instituto";
-    const text = `🌟 ¡Mira el perfil de la estrella docente *${prof.name}* en *${instName}*! Vota por ellos y descubre más en Starryz5: ${url}`;
+    const profName = prof.nombreCompleto || prof.name || "Docente";
+    const text = `🌟 ¡Mira el perfil de la estrella docente *${profName}* en *${instName}*! Vota por ellos y descubre más en Starryz5: ${url}`;
     setShareData({
       title: 'Compartir Perfil de Docente',
       text: text,
@@ -917,7 +918,7 @@ export default function App() {
     const unsubscribe = onSnapshot(collection(db, path), async (snapshot) => {
       const list: any[] = [];
       snapshot.forEach((snapDoc) => {
-        list.push(snapDoc.data());
+        list.push({ id: snapDoc.id, ...snapDoc.data() });
       });
       setProfessors(list);
     }, (error) => {
@@ -2891,8 +2892,9 @@ export default function App() {
 
     if (selectedProfessorId && currentSelectedProfessor) {
       const instName = currentSelectedInstitute?.name || "Instituto";
-      title = `Prof. ${currentSelectedProfessor.name} | ${instName}`;
-      desc = `Mira el perfil de la estrella docente ${currentSelectedProfessor.name} en Starryz5.`;
+      const profName = currentSelectedProfessor.nombreCompleto || currentSelectedProfessor.name || "Docente";
+      title = `Prof. ${profName} | ${instName}`;
+      desc = `Mira el perfil de la estrella docente ${profName} en Starryz5.`;
       if (currentSelectedInstitute?.perfilPhotoUrl) {
         imageUrl = currentSelectedInstitute.perfilPhotoUrl;
       }
@@ -4676,7 +4678,7 @@ export default function App() {
                       <div className="text-left space-y-1">
                         <span className="text-[10px] font-mono uppercase tracking-widest text-yellow-400 font-black">ENFRENTAMIENTO DIRECTO</span>
                         <h4 className="text-lg sm:text-xl font-display font-black text-white uppercase tracking-wide">
-                          ¿Quién es tu favorita?
+                          ¿Quién crees que debió ganar?
                         </h4>
                       </div>
                       
@@ -5847,14 +5849,20 @@ export default function App() {
                 
                 {/* Overlapping Avatar */}
                 <div className="relative w-28 h-28 mx-auto -mt-14 mb-4">
-                  <img 
-                    src={currentSelectedProfessor.gender === 'female' 
-                      ? 'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&q=80&w=200' 
-                      : 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=200'
-                    } 
-                    alt={currentSelectedProfessor.name} 
-                    className="w-full h-full rounded-full object-cover border-4 border-yellow-400 shadow-2xl shadow-yellow-400/5"
-                  />
+                  {(() => {
+                    const avatarBgColors = ["%2394a3b8", "%23a1a1aa", "%238a8a93", "%2371717a", "%2364748b", "%234b5563"];
+                    const profName = currentSelectedProfessor.nombreCompleto || currentSelectedProfessor.name || "Docente";
+                    const nameHash = profName.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+                    const bgColor = avatarBgColors[nameHash % avatarBgColors.length];
+                    const svgAvatar = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" fill="${bgColor}"/><circle cx="50" cy="38" r="18" fill="%23ffffff"/><path d="M50 62c-18 0-30 10-30 22v6h60v-6c0-12-12-22-30-22z" fill="%23ffffff"/></svg>`;
+                    return (
+                      <img 
+                        src={svgAvatar} 
+                        alt={profName} 
+                        className="w-full h-full rounded-full object-cover border-4 border-yellow-400 bg-zinc-900 shadow-2xl shadow-yellow-400/5"
+                      />
+                    );
+                  })()}
                   
                   {/* Rating badge overlapping on bottom-right of avatar */}
                   <div className="absolute -bottom-1 -right-1 bg-yellow-400 text-black border-2 border-[#0b0b0c] px-2.5 py-1 rounded-full font-mono font-black text-xs shadow-lg flex items-center gap-0.5 select-none">
@@ -5867,7 +5875,7 @@ export default function App() {
 
                 {/* Name */}
                 <h2 className="text-xl sm:text-2xl font-display font-black text-white uppercase tracking-tight">
-                  {currentSelectedProfessor.name}
+                  {currentSelectedProfessor.nombreCompleto || currentSelectedProfessor.name || 'Docente'}
                 </h2>
                 
                 {/* Title */}
@@ -5883,6 +5891,7 @@ export default function App() {
                   {/* Card 1: Yo te conozco */}
                   {(() => {
                     const hasVoted = (userVotes[currentSelectedProfessor.id] || { yoTeConozco: false }).yoTeConozco;
+                    const profName = currentSelectedProfessor.nombreCompleto || currentSelectedProfessor.name || "Docente";
                     return (
                       <button
                         onClick={() => handleVoteProfessorType(currentSelectedProfessor.id, 'yoTeConozco')}
@@ -5895,7 +5904,7 @@ export default function App() {
                       >
                         {/* Name - NEW */}
                         <span className="text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-widest truncate w-full px-1">
-                          {currentSelectedProfessor.name}
+                          {profName}
                         </span>
                         {/* Icon */}
                         <div className="flex justify-center items-center w-full">
@@ -5918,6 +5927,7 @@ export default function App() {
                   {/* Card 2: Fan */}
                   {(() => {
                     const hasVoted = (userVotes[currentSelectedProfessor.id] || { fan: false }).fan;
+                    const profName = currentSelectedProfessor.nombreCompleto || currentSelectedProfessor.name || "Docente";
                     return (
                       <button
                         onClick={() => handleVoteProfessorType(currentSelectedProfessor.id, 'fan')}
@@ -5930,7 +5940,7 @@ export default function App() {
                       >
                         {/* Name - NEW */}
                         <span className="text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-widest truncate w-full px-1">
-                          {currentSelectedProfessor.name}
+                          {profName}
                         </span>
                         {/* Icon */}
                         <div className="flex justify-center items-center w-full">
